@@ -6,7 +6,6 @@
 class VideoPlayer {
     constructor() {
         this.video = document.getElementById('video-player');
-        this.container = document.querySelector('.video-container');
         this.overlay = document.getElementById('player-overlay');
         this.nowPlaying = document.getElementById('now-playing');
         this.hls = null;
@@ -32,7 +31,8 @@ class VideoPlayer {
             defaultVolume: 80, // 0-100
             rememberVolume: true, // Persist volume between sessions
             lastVolume: 80, // Last used volume (if rememberVolume is true)
-            autoPlayNextEpisode: false // Auto-play next episode in series
+            autoPlayNextEpisode: false,
+            forceProxy: false // Force all streams through backend proxy
         };
         try {
             const saved = localStorage.getItem('nodecast_tv_player_settings');
@@ -56,33 +56,6 @@ class VideoPlayer {
         }
     }
 
-    /**
-     * Get HLS.js configuration with buffer settings optimized for stable playback
-     */
-    getHlsConfig() {
-        return {
-            enableWorker: true,
-            // Buffer settings to prevent underruns during background tab throttling
-            maxBufferLength: 30,           // Buffer up to 30 seconds of content
-            maxMaxBufferLength: 60,        // Absolute max buffer 60 seconds
-            maxBufferSize: 60 * 1000 * 1000, // 60MB max buffer size
-            // Live stream settings - stay further from live edge for stability
-            liveSyncDurationCount: 3,      // Stay 3 segments behind live
-            liveMaxLatencyDurationCount: 10, // Allow up to 10 segments behind before catching up
-            // Handle audio discontinuities (fixes garbled audio during ad transitions)
-            stretchShortVideoTrack: true,  // Stretch short segments to avoid gaps
-            forceKeyFrameOnDiscontinuity: true, // Force keyframe sync on discontinuity
-            // Faster recovery from errors
-            levelLoadingMaxRetry: 4,
-            manifestLoadingMaxRetry: 4,
-            fragLoadingMaxRetry: 6,
-            // Caption/Subtitle settings
-            enableCEA708Captions: true,    // Enable CEA-708 closed captions
-            enableWebVTT: true,            // Enable WebVTT subtitles
-            renderTextTracksNatively: true // Use native browser rendering for text tracks
-        };
-    }
-
     init() {
         // Apply default/remembered volume
         const volume = this.settings.rememberVolume ? this.settings.lastVolume : this.settings.defaultVolume;
@@ -98,7 +71,10 @@ class VideoPlayer {
 
         // Initialize HLS.js if supported
         if (Hls.isSupported()) {
-            this.hls = new Hls(this.getHlsConfig());
+            this.hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true
+            });
 
             this.hls.on(Hls.Events.ERROR, (event, data) => {
                 console.error('HLS error:', data);
@@ -125,22 +101,7 @@ class VideoPlayer {
                             this.stop();
                             break;
                     }
-                } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                    // Non-fatal media error - try to recover (handles audio codec issues)
-                    console.log('Non-fatal media error, attempting recovery...');
-                    this.hls.recoverMediaError();
                 }
-            });
-
-            // Detect audio track switches (can cause audio glitches on some streams)
-            this.hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
-                console.log('Audio track switched:', data);
-            });
-
-            // Detect buffer stalls which may indicate codec issues
-            this.hls.on(Hls.Events.BUFFER_STALLED_ERROR, () => {
-                console.log('Buffer stalled, attempting recovery...');
-                this.hls.recoverMediaError();
             });
 
             this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -202,21 +163,14 @@ class VideoPlayer {
             this.currentUrl = streamUrl;
 
             // Proactively use proxy for known CORS-restricted domains (like Pluto TV)
-            // Note: Xtream sources are NOT auto-proxied because many providers IP-lock streams
             const proxyRequiredDomains = ['pluto.tv'];
-            const needsProxy = proxyRequiredDomains.some(domain => streamUrl.includes(domain));
+            const needsProxy = this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl) : streamUrl;
 
-            // Detect if this is likely an HLS stream (vs direct video file like MP4)
-            const looksLikeHls = finalUrl.includes('.m3u8') ||
-                finalUrl.includes('m3u8') ||
-                (!finalUrl.includes('.mp4') && !finalUrl.includes('.mkv') && !finalUrl.includes('.avi'));
-
-            // Priority 1: Use HLS.js for HLS streams on browsers that support it
-            if (looksLikeHls && Hls.isSupported()) {
-                this.hls = new Hls(this.getHlsConfig());
+            if (finalUrl.includes('.m3u8') && Hls.isSupported()) {
+                this.hls = new Hls();
                 this.hls.loadSource(finalUrl);
                 this.hls.attachMedia(this.video);
 
@@ -227,26 +181,18 @@ class VideoPlayer {
                 // Re-attach error handler for the new Hls instance
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
-                        // CORS issues can manifest as NETWORK_ERROR or MEDIA_ERROR with fragParsingError
-                        const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
-                            (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
-
-                        if (isCorsLikely && !this.isUsingProxy) {
-                            console.log('CORS/Network error detected, retrying via proxy...', data.details);
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !this.isUsingProxy) {
+                            console.log('CORS/Network error detected, retrying via proxy...');
                             this.isUsingProxy = true;
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl));
                             this.hls.startLoad();
-                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                            console.log('Media error, attempting recovery...');
-                            this.hls.recoverMediaError();
                         } else {
                             console.error('Fatal HLS error:', data);
                         }
                     }
                 });
-            } else if (this.video.canPlayType('application/vnd.apple.mpegurl') === 'probably' ||
-                this.video.canPlayType('application/vnd.apple.mpegurl') === 'maybe') {
-                // Priority 2: Native HLS support (Safari on iOS/macOS where HLS.js may not work)
+            } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     console.log('Autoplay prevented, trying proxy if CORS error:', e);
@@ -257,7 +203,7 @@ class VideoPlayer {
                     }
                 });
             } else {
-                // Priority 3: Try direct playback for non-HLS streams
+                // Try direct playback
                 this.video.src = finalUrl;
                 this.video.play().catch(e => console.log('Autoplay prevented:', e));
             }
@@ -550,8 +496,8 @@ class VideoPlayer {
     toggleFullscreen() {
         if (document.fullscreenElement) {
             document.exitFullscreen();
-        } else if (this.container) {
-            this.container.requestFullscreen();
+        } else {
+            this.video.requestFullscreen();
         }
     }
 }
