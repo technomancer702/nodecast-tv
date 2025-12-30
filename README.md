@@ -13,6 +13,7 @@ A modern, web-based IPTV player featuring Live TV, EPG, Movies (VOD), and Series
   - Support for Xtream Codes and M3U playlists.
   - Manage hidden content categories.
   - Playback preferences (volume memory, auto-play).
+- **🔊 Audio Transcoding**: Optional FFmpeg-based audio transcoding for Dolby/AC3/EAC3 compatibility.
 - **🐳 Docker Ready**: Easy deployment containerization.
 
 ## Screenshots
@@ -104,6 +105,17 @@ This means codec support depends entirely on what your browser can decode native
 - The stream codec may not be supported by your browser
 - Try a different browser (Safari for HEVC/Dolby, Chrome/Edge for VP9/AV1)
 - Check if your IPTV provider offers alternative stream formats
+- For Dolby audio issues, enable **"Force Audio Transcode"** in Settings → Streaming
+
+### Audio Transcoding
+
+For streams with Dolby Digital (AC3/EAC3) audio that browsers can't decode natively:
+
+1. Install FFmpeg support: `npm install ffmpeg-static` (included as optional dependency)
+2. Enable **"Force Audio Transcode"** in Settings → Streaming
+3. Audio will be transcoded to AAC while video passes through unchanged
+
+**Note:** For ad-stitched live streams (like Pluto TV), transcoding may struggle to keep up. These streams typically use AAC audio already, so the built-in HLS discontinuity handling manages audio transitions without transcoding.
 
 ## Supported Stream Types
 
@@ -144,6 +156,7 @@ If you're using TVHeadend as your source, you may need to configure a few settin
 - **Frontend**: Vanilla JavaScript (ES6+), CSS3
 - **Database**: JSON-based local storage (LowDB style)
 - **Streaming**: HLS.js for stream playback
+- **Transcoding**: FFmpeg (optional, via ffmpeg-static)
 
 ## Project Structure
 
@@ -157,7 +170,7 @@ nodecast-tv/
 │   │   └── api.js       # API Client
 │   └── index.html       # Main entry point
 ├── server/              # Backend server
-│   ├── routes/          # API Endpoints
+│   ├── routes/          # API Endpoints (proxy, transcode)
 │   ├── services/        # Playlist parsers & logic
 │   └── db.js            # Data persistence layer
 └── data/                # Persistent storage (playlists, settings)
