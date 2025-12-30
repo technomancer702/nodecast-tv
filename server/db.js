@@ -1,61 +1,75 @@
-const fs = require('fs');
+const fs = require('fs/promises');
 const path = require('path');
+const { existsSync, mkdirSync } = require('fs');
 
-// Ensure data directory exists
+// Ensure data directory exists (sync is fine for startup)
 const dataDir = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true });
 }
 
 const dbPath = path.join(dataDir, 'db.json');
 
 // Initialize database structure
-function loadDb() {
+async function loadDb() {
   try {
-    if (fs.existsSync(dbPath)) {
-      const data = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
-      // Ensure all keys exist
+    // Check if file exists (using fs.access is better for async, but we can catch ENOENT)
+    try {
+      const fileContent = await fs.readFile(dbPath, 'utf-8');
+      const data = JSON.parse(fileContent);
       return {
         sources: data.sources || [],
         hiddenItems: data.hiddenItems || [],
         favorites: data.favorites || [],
         nextId: data.nextId || 1
       };
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        // File doesn't exist, return default
+        return {
+          sources: [],
+          hiddenItems: [],
+          favorites: [],
+          nextId: 1
+        };
+      }
+      throw error;
     }
   } catch (err) {
     console.error('Error loading database:', err);
+    // Return safe default on error to prevent crashing, but log it
+    return {
+      sources: [],
+      hiddenItems: [],
+      favorites: [],
+      nextId: 1
+    };
   }
-  return {
-    sources: [],
-    hiddenItems: [],
-    favorites: [],
-    nextId: 1
-  };
 }
 
-function saveDb(data) {
-  fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+async function saveDb(data) {
+  await fs.writeFile(dbPath, JSON.stringify(data, null, 2));
 }
 
 // Source CRUD operations
 const sources = {
-  getAll() {
-    const db = loadDb();
+  async getAll() {
+    const db = await loadDb();
     return db.sources;
   },
 
-  getById(id) {
-    const db = loadDb();
+  async getById(id) {
+    const db = await loadDb();
     return db.sources.find(s => s.id === parseInt(id));
   },
 
-  getByType(type) {
-    const db = loadDb();
+  async getByType(type) {
+    const db = await loadDb();
     return db.sources.filter(s => s.type === type && s.enabled);
   },
 
-  create(source) {
-    const db = loadDb();
+  async create(source) {
+    const db = await loadDb();
     const newSource = {
       id: db.nextId++,
       ...source,
@@ -64,12 +78,12 @@ const sources = {
       updated_at: new Date().toISOString()
     };
     db.sources.push(newSource);
-    saveDb(db);
+    await saveDb(db);
     return newSource;
   },
 
-  update(id, updates) {
-    const db = loadDb();
+  async update(id, updates) {
+    const db = await loadDb();
     const index = db.sources.findIndex(s => s.id === parseInt(id));
     if (index === -1) return null;
 
@@ -78,25 +92,25 @@ const sources = {
       ...updates,
       updated_at: new Date().toISOString()
     };
-    saveDb(db);
+    await saveDb(db);
     return db.sources[index];
   },
 
-  delete(id) {
-    const db = loadDb();
+  async delete(id) {
+    const db = await loadDb();
     db.sources = db.sources.filter(s => s.id !== parseInt(id));
     // Also delete related hidden items
     db.hiddenItems = db.hiddenItems.filter(h => h.source_id !== parseInt(id));
-    saveDb(db);
+    await saveDb(db);
   },
 
-  toggleEnabled(id) {
-    const db = loadDb();
+  async toggleEnabled(id) {
+    const db = await loadDb();
     const source = db.sources.find(s => s.id === parseInt(id));
     if (source) {
       source.enabled = !source.enabled;
       source.updated_at = new Date().toISOString();
-      saveDb(db);
+      await saveDb(db);
     }
     return source;
   }
@@ -104,16 +118,16 @@ const sources = {
 
 // Hidden items operations
 const hiddenItems = {
-  getAll(sourceId = null) {
-    const db = loadDb();
+  async getAll(sourceId = null) {
+    const db = await loadDb();
     if (sourceId) {
       return db.hiddenItems.filter(h => h.source_id === parseInt(sourceId));
     }
     return db.hiddenItems;
   },
 
-  hide(sourceId, itemType, itemId) {
-    const db = loadDb();
+  async hide(sourceId, itemType, itemId) {
+    const db = await loadDb();
     // Check if already hidden
     const exists = db.hiddenItems.find(
       h => h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId
@@ -125,27 +139,27 @@ const hiddenItems = {
         item_type: itemType,
         item_id: itemId
       });
-      saveDb(db);
+      await saveDb(db);
     }
   },
 
-  show(sourceId, itemType, itemId) {
-    const db = loadDb();
+  async show(sourceId, itemType, itemId) {
+    const db = await loadDb();
     db.hiddenItems = db.hiddenItems.filter(
       h => !(h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId)
     );
-    saveDb(db);
+    await saveDb(db);
   },
 
-  isHidden(sourceId, itemType, itemId) {
-    const db = loadDb();
+  async isHidden(sourceId, itemType, itemId) {
+    const db = await loadDb();
     return db.hiddenItems.some(
       h => h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId
     );
   },
 
-  bulkHide(items) {
-    const db = loadDb();
+  async bulkHide(items) {
+    const db = await loadDb();
     let modified = false;
 
     items.forEach(item => {
@@ -166,13 +180,13 @@ const hiddenItems = {
     });
 
     if (modified) {
-      saveDb(db);
+      await saveDb(db);
     }
     return true;
   },
 
-  bulkShow(items) {
-    const db = loadDb();
+  async bulkShow(items) {
+    const db = await loadDb();
     const initialLength = db.hiddenItems.length;
 
     // Create a set of "signatures" for O(1) lookup of items to remove
@@ -183,7 +197,7 @@ const hiddenItems = {
     );
 
     if (db.hiddenItems.length !== initialLength) {
-      saveDb(db);
+      await saveDb(db);
     }
     return true;
   }
@@ -191,8 +205,8 @@ const hiddenItems = {
 
 // Favorites operations
 const favorites = {
-  getAll(sourceId = null, itemType = null) {
-    const db = loadDb();
+  async getAll(sourceId = null, itemType = null) {
+    const db = await loadDb();
     let results = db.favorites;
     if (sourceId) {
       results = results.filter(f => f.source_id === parseInt(sourceId));
@@ -203,8 +217,8 @@ const favorites = {
     return results;
   },
 
-  add(sourceId, itemId, itemType = 'channel') {
-    const db = loadDb();
+  async add(sourceId, itemId, itemType = 'channel') {
+    const db = await loadDb();
     // Check if already favorited
     const exists = db.favorites.find(
       f => f.source_id === parseInt(sourceId) && f.item_id === String(itemId) && f.item_type === itemType
@@ -217,22 +231,22 @@ const favorites = {
         item_type: itemType, // 'channel', 'movie', 'series'
         created_at: new Date().toISOString()
       });
-      saveDb(db);
+      await saveDb(db);
     }
     return true;
   },
 
-  remove(sourceId, itemId, itemType = 'channel') {
-    const db = loadDb();
+  async remove(sourceId, itemId, itemType = 'channel') {
+    const db = await loadDb();
     db.favorites = db.favorites.filter(
       f => !(f.source_id === parseInt(sourceId) && f.item_id === String(itemId) && f.item_type === itemType)
     );
-    saveDb(db);
+    await saveDb(db);
     return true;
   },
 
-  isFavorite(sourceId, itemId, itemType = 'channel') {
-    const db = loadDb();
+  async isFavorite(sourceId, itemId, itemType = 'channel') {
+    const db = await loadDb();
     return db.favorites.some(
       f => f.source_id === parseInt(sourceId) && f.item_id === String(itemId) && f.item_type === itemType
     );

@@ -4,9 +4,9 @@ const { sources } = require('../db');
 const xtreamApi = require('../services/xtreamApi');
 
 // Get all sources
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        const allSources = sources.getAll();
+        const allSources = await sources.getAll();
         // Don't expose passwords in list view
         const sanitized = allSources.map(s => ({
             ...s,
@@ -20,9 +20,9 @@ router.get('/', (req, res) => {
 });
 
 // Get sources by type
-router.get('/type/:type', (req, res) => {
+router.get('/type/:type', async (req, res) => {
     try {
-        const typeSources = sources.getByType(req.params.type);
+        const typeSources = await sources.getByType(req.params.type);
         res.json(typeSources);
     } catch (err) {
         console.error('Error getting sources by type:', err);
@@ -31,9 +31,9 @@ router.get('/type/:type', (req, res) => {
 });
 
 // Get single source
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
-        const source = sources.getById(req.params.id);
+        const source = await sources.getById(req.params.id);
         if (!source) {
             return res.status(404).json({ error: 'Source not found' });
         }
@@ -45,7 +45,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Create source
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
     try {
         const { type, name, url, username, password } = req.body;
 
@@ -57,7 +57,7 @@ router.post('/', (req, res) => {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        const source = sources.create({ type, name, url, username, password });
+        const source = await sources.create({ type, name, url, username, password });
         res.status(201).json(source);
     } catch (err) {
         console.error('Error creating source:', err);
@@ -66,15 +66,15 @@ router.post('/', (req, res) => {
 });
 
 // Update source
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
     try {
-        const existing = sources.getById(req.params.id);
+        const existing = await sources.getById(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Source not found' });
         }
 
         const { name, url, username, password } = req.body;
-        const updated = sources.update(req.params.id, {
+        const updated = await sources.update(req.params.id, {
             name: name || existing.name,
             url: url || existing.url,
             username: username !== undefined ? username : existing.username,
@@ -88,13 +88,13 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete source
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
-        const existing = sources.getById(req.params.id);
+        const existing = await sources.getById(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Source not found' });
         }
-        sources.delete(req.params.id);
+        await sources.delete(req.params.id);
         res.json({ success: true });
     } catch (err) {
         console.error('Error deleting source:', err);
@@ -103,9 +103,9 @@ router.delete('/:id', (req, res) => {
 });
 
 // Toggle source enabled/disabled
-router.post('/:id/toggle', (req, res) => {
+router.post('/:id/toggle', async (req, res) => {
     try {
-        const updated = sources.toggleEnabled(req.params.id);
+        const updated = await sources.toggleEnabled(req.params.id);
         if (!updated) {
             return res.status(404).json({ error: 'Source not found' });
         }
@@ -119,7 +119,7 @@ router.post('/:id/toggle', (req, res) => {
 // Test source connection
 router.post('/:id/test', async (req, res) => {
     try {
-        const source = sources.getById(req.params.id);
+        const source = await sources.getById(req.params.id);
         if (!source) {
             return res.status(404).json({ error: 'Source not found' });
         }

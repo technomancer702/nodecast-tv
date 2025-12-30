@@ -5,6 +5,7 @@ const xtreamApi = require('../services/xtreamApi');
 const m3uParser = require('../services/m3uParser');
 const epgParser = require('../services/epgParser');
 const cache = require('../services/cache');
+const { Readable } = require('stream');
 
 // Default cache TTL: 24 hours
 const DEFAULT_MAX_AGE_HOURS = 24;
@@ -16,7 +17,7 @@ const DEFAULT_MAX_AGE_HOURS = 24;
 router.get('/xtream/:sourceId/:action', async (req, res) => {
     try {
         const sourceId = req.params.sourceId;
-        const source = sources.getById(sourceId);
+        const source = await sources.getById(sourceId);
         if (!source || source.type !== 'xtream') {
             return res.status(404).json({ error: 'Xtream source not found' });
         }
@@ -99,9 +100,9 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
  * Get Xtream stream URL
  * GET /api/proxy/xtream/:sourceId/stream/:streamId
  */
-router.get('/xtream/:sourceId/stream/:streamId/:type?', (req, res) => {
+router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
     try {
-        const source = sources.getById(req.params.sourceId);
+        const source = await sources.getById(req.params.sourceId);
         if (!source || source.type !== 'xtream') {
             return res.status(404).json({ error: 'Xtream source not found' });
         }
@@ -125,7 +126,7 @@ router.get('/xtream/:sourceId/stream/:streamId/:type?', (req, res) => {
 router.get('/m3u/:sourceId', async (req, res) => {
     try {
         const sourceId = req.params.sourceId;
-        const source = sources.getById(sourceId);
+        const source = await sources.getById(sourceId);
         if (!source || source.type !== 'm3u') {
             return res.status(404).json({ error: 'M3U source not found' });
         }
@@ -164,7 +165,7 @@ router.get('/m3u/:sourceId', async (req, res) => {
 router.get('/epg/:sourceId', async (req, res) => {
     try {
         const sourceId = req.params.sourceId;
-        const source = sources.getById(sourceId);
+        const source = await sources.getById(sourceId);
         if (!source || (source.type !== 'epg' && source.type !== 'xtream')) {
             return res.status(404).json({ error: 'Valid EPG source not found' });
         }
@@ -226,7 +227,7 @@ router.delete('/epg/:sourceId/cache', (req, res) => {
  */
 router.post('/epg/:sourceId/channels', async (req, res) => {
     try {
-        const source = sources.getById(req.params.sourceId);
+        const source = await sources.getById(req.params.sourceId);
         if (!source || source.type !== 'epg') {
             return res.status(404).json({ error: 'EPG source not found' });
         }
@@ -277,7 +278,6 @@ router.get('/stream', async (req, res) => {
         const response = await fetch(url, { headers });
         if (!response.ok) {
             console.error(`Upstream error for ${url.substring(0, 80)}...: ${response.status} ${response.statusText}`);
-            // Log response body for debugging 403s
             if (response.status === 403) {
                 const errorBody = await response.text().catch(() => 'N/A');
                 console.error(`403 Response body: ${errorBody.substring(0, 200)}`);
@@ -289,25 +289,22 @@ router.get('/stream', async (req, res) => {
         res.set('Access-Control-Allow-Origin', '*');
 
         // Create an async iterator for the response body
-        // Note: undici fetch returns an iterable body
         const iterator = response.body[Symbol.asyncIterator]();
         const first = await iterator.next();
 
         if (first.done) {
-            // Empty response
             res.set('Content-Type', contentType || 'application/octet-stream');
             return res.end();
         }
 
         const firstChunk = Buffer.from(first.value);
 
-        // Peek at first bytes to check for HLS manifest (#EXTM3U)
+        // Peek at first bytes to check for HLS manifest ({ #EXTM3U })
         const textPrefix = firstChunk.subarray(0, 7).toString('utf8');
         const contentLooksLikeHls = textPrefix === '#EXTM3U';
 
         if (contentLooksLikeHls) {
-            // HLS Manifest: We must read the WHOLE stream to rewrite it
-            // This is fine because manifests are small text files
+            // HLS Manifest: We must read the WHOLE manifest to rewrite it
             const chunks = [firstChunk];
 
             // Consume the rest of the stream
@@ -318,8 +315,6 @@ router.get('/stream', async (req, res) => {
             }
 
             const buffer = Buffer.concat(chunks);
-
-            // Use the final URL after redirects for base URL calculation
             const finalUrl = response.url || url;
             console.log(`[Proxy] Processing HLS manifest from: ${finalUrl.substring(0, 80)}...`);
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
@@ -328,11 +323,9 @@ router.get('/stream', async (req, res) => {
 
             const finalUrlObj = new URL(finalUrl);
             const baseUrl = finalUrlObj.origin + finalUrlObj.pathname.substring(0, finalUrlObj.pathname.lastIndexOf('/') + 1);
-            console.log(`[Proxy] Base URL for rewriting: ${baseUrl}`);
 
             manifest = manifest.split('\n').map(line => {
                 const trimmed = line.trim();
-                // ... same rewrite logic as before ...
                 if (trimmed === '' || trimmed.startsWith('#')) {
                     if (trimmed.includes('URI="')) {
                         return line.replace(/URI="([^"]+)"/g, (match, p1) => {
@@ -360,34 +353,19 @@ router.get('/stream', async (req, res) => {
             return res.send(manifest);
         }
 
-        // Binary content (Video Segment): STREAM IT!
-        // This is the critical fix for "SocketError: other side closed"
+        // Binary content (Video Segment): Efficient Pipe
         console.log(`[Proxy] Piping binary stream (${contentType})`);
         res.set('Content-Type', contentType || 'application/octet-stream');
 
-        // Write the first chunk we already peeked
+        // Write the chunk we peeked
         res.write(firstChunk);
 
-        // Pipe the rest of the iterator to the response
-        try {
-            let result = await iterator.next();
-            while (!result.done) {
-                // If client disconnects, stop reading
-                if (res.writableEnded || res.closed) break;
+        // Stream the rest
+        // Create a readable stream from the iterator
+        const restOfStream = Readable.from(iterator);
 
-                const canWrite = res.write(Buffer.from(result.value));
-                if (!canWrite) {
-                    // Handle backpressure
-                    await new Promise(resolve => res.once('drain', resolve));
-                }
-                result = await iterator.next();
-            }
-            res.end();
-        } catch (streamErr) {
-            console.error('Stream pipe error:', streamErr);
-            if (!res.headersSent) res.status(500).end();
-            else res.end();
-        }
+        // Pipe to response
+        restOfStream.pipe(res);
 
     } catch (err) {
         console.error('Stream proxy error:', err);
@@ -420,15 +398,21 @@ router.get('/image', async (req, res) => {
             return res.status(response.status).send('Failed to fetch image');
         }
 
-        // Forward content type
         const contentType = response.headers.get('content-type') || 'image/png';
         res.set('Content-Type', contentType);
         res.set('Access-Control-Allow-Origin', '*');
         res.set('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
 
-        // Pipe the image data
-        const buffer = await response.arrayBuffer();
-        res.send(Buffer.from(buffer));
+        // Efficiently pipe the response body
+        if (response.body) {
+            // response.body is an AsyncIterable in standard fetch/undici
+            // Readable.from converts it to a Node.js Readable stream
+            const stream = Readable.from(response.body);
+            stream.pipe(res);
+        } else {
+            res.end();
+        }
+
     } catch (err) {
         console.error('Image proxy error:', err.message);
         res.status(500).send('Image proxy error');

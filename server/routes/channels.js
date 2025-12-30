@@ -3,10 +3,10 @@ const router = express.Router();
 const { hiddenItems } = require('../db');
 
 // Get all hidden items
-router.get('/hidden', (req, res) => {
+router.get('/hidden', async (req, res) => {
     try {
         const { sourceId } = req.query;
-        const items = hiddenItems.getAll(sourceId ? parseInt(sourceId) : null);
+        const items = await hiddenItems.getAll(sourceId ? parseInt(sourceId) : null);
         res.json(items);
     } catch (err) {
         console.error('Error getting hidden items:', err);
@@ -15,7 +15,7 @@ router.get('/hidden', (req, res) => {
 });
 
 // Hide a channel, group, or category
-router.post('/hide', (req, res) => {
+router.post('/hide', async (req, res) => {
     try {
         const { sourceId, itemType, itemId } = req.body;
 
@@ -28,7 +28,7 @@ router.post('/hide', (req, res) => {
             return res.status(400).json({ error: `itemType must be one of: ${validTypes.join(', ')}` });
         }
 
-        hiddenItems.hide(sourceId, itemType, itemId);
+        await hiddenItems.hide(sourceId, itemType, itemId);
         res.json({ success: true });
     } catch (err) {
         console.error('Error hiding item:', err);
@@ -37,7 +37,7 @@ router.post('/hide', (req, res) => {
 });
 
 // Show (unhide) a channel or group
-router.post('/show', (req, res) => {
+router.post('/show', async (req, res) => {
     try {
         const { sourceId, itemType, itemId } = req.body;
 
@@ -45,7 +45,7 @@ router.post('/show', (req, res) => {
             return res.status(400).json({ error: 'sourceId, itemType, and itemId are required' });
         }
 
-        hiddenItems.show(sourceId, itemType, itemId);
+        await hiddenItems.show(sourceId, itemType, itemId);
         res.json({ success: true });
     } catch (err) {
         console.error('Error showing item:', err);
@@ -54,7 +54,7 @@ router.post('/show', (req, res) => {
 });
 
 // Check if item is hidden
-router.get('/hidden/check', (req, res) => {
+router.get('/hidden/check', async (req, res) => {
     try {
         const { sourceId, itemType, itemId } = req.query;
 
@@ -62,7 +62,8 @@ router.get('/hidden/check', (req, res) => {
             return res.status(400).json({ error: 'sourceId, itemType, and itemId are required' });
         }
 
-        const isHidden = hiddenItems.isHidden(parseInt(sourceId), itemType, itemId);
+        // isHidden is now async
+        const isHidden = await hiddenItems.isHidden(parseInt(sourceId), itemType, itemId);
         res.json({ hidden: isHidden });
     } catch (err) {
         console.error('Error checking hidden status:', err);
@@ -71,7 +72,7 @@ router.get('/hidden/check', (req, res) => {
 });
 
 // Bulk hide channels and groups
-router.post('/hide/bulk', (req, res) => {
+router.post('/hide/bulk', async (req, res) => {
     try {
         const { items } = req.body;
 
@@ -79,7 +80,7 @@ router.post('/hide/bulk', (req, res) => {
             return res.status(400).json({ error: 'items array is required' });
         }
 
-        hiddenItems.bulkHide(items);
+        await hiddenItems.bulkHide(items);
         res.json({ success: true, count: items.length });
     } catch (err) {
         console.error('Error bulk hiding items:', err);
@@ -88,7 +89,7 @@ router.post('/hide/bulk', (req, res) => {
 });
 
 // Bulk show channels and groups
-router.post('/show/bulk', (req, res) => {
+router.post('/show/bulk', async (req, res) => {
     try {
         const { items } = req.body;
 
@@ -96,7 +97,7 @@ router.post('/show/bulk', (req, res) => {
             return res.status(400).json({ error: 'items array is required' });
         }
 
-        hiddenItems.bulkShow(items);
+        await hiddenItems.bulkShow(items);
         res.json({ success: true, count: items.length });
     } catch (err) {
         console.error('Error bulk showing items:', err);
