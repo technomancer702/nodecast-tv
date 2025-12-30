@@ -19,8 +19,8 @@ A modern, web-based IPTV player featuring Live TV, EPG, Movies (VOD), and Series
 ## Screenshots
 
 <div align="center">
-  <img src="public/img/screenshots/screenshot-1.png" width="45%" alt="Screenshot 1" />
   <img src="public/img/screenshots/screenshot-2.png" width="45%" alt="Screenshot 2" />
+  <img src="public/img/screenshots/screenshot-1.png" width="45%" alt="Screenshot 1" />
   <img src="public/img/screenshots/screenshot-3.png" width="45%" alt="Screenshot 3" />
   <img src="public/img/screenshots/screenshot-4.png" width="45%" alt="Screenshot 4" />
 </div>
