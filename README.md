@@ -129,7 +129,7 @@ For streams with Dolby Digital (AC3/EAC3) audio that browsers can't decode nativ
 NodeCast TV is optimized for **HLS (HTTP Live Streaming)**.
 
 -   **✅ HLS (`.m3u8`)**: Fully supported and recommended. Best for adaptive bitrate and network resilience.
--   **✅ MPEG-TS (`.ts`)**: Supported via Force Remux or Force Audio Transcode settings.
+-   **✅ MPEG-TS (`.ts`)**: Supported via Force Remux in settings.
 -   **⚠️ High Latency/P2P**: For sources like Acestream, prefer HLS output (`.m3u8`) over raw TS streams to avoid timeouts during buffering.
 -   **❌ RTMP/RTSP**: Not supported natively by browsers.
 
