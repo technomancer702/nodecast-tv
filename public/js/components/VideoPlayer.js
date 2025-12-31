@@ -69,7 +69,7 @@ class VideoPlayer {
             maxBufferLength: 30,           // Buffer up to 30 seconds of content
             maxMaxBufferLength: 60,        // Absolute max buffer 60 seconds
             maxBufferSize: 60 * 1000 * 1000, // 60MB max buffer size
-            maxBufferHole: 0.5,            // Allow 0.5s holes in buffer (helps with discontinuities)
+            maxBufferHole: 1.0,            // Allow 1s holes in buffer (helps with discontinuities)
             // Live stream settings - stay further from live edge for stability
             liveSyncDurationCount: 3,      // Stay 3 segments behind live
             liveMaxLatencyDurationCount: 10, // Allow up to 10 segments behind before catching up
@@ -77,8 +77,14 @@ class VideoPlayer {
             // Audio discontinuity handling (fixes garbled audio during ad transitions)
             stretchShortVideoTrack: true,  // Stretch short segments to avoid gaps
             forceKeyFrameOnDiscontinuity: true, // Force keyframe sync on discontinuity
-            // More aggressive discontinuity recovery
-            maxAudioFramesDrift: 1,        // Allow minimal audio drift before correction
+            // Audio drift tolerance - higher = less aggressive correction = fewer glitches
+            // 1 frame = ~23ms at 44.1kHz, so 4 frames = ~92ms tolerance
+            maxAudioFramesDrift: 4,        // Allow ~92ms audio drift before correction
+            // Disable progressive/streaming mode for stability with discontinuities
+            progressive: false,
+            // Stall recovery settings
+            nudgeOffset: 0.2,              // Larger nudge steps for recovery (default 0.1)
+            nudgeMaxRetry: 6,              // More retry attempts (default 3)
             // Faster recovery from errors
             levelLoadingMaxRetry: 4,
             manifestLoadingMaxRetry: 4,
