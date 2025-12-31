@@ -313,31 +313,37 @@ class VideoPlayer {
             this.isUsingProxy = needsProxy;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl) : streamUrl;
 
-            // Detect if this is likely an HLS stream (vs direct video file like MP4)
-            // Note: .ts files are raw MPEG-TS, NOT HLS manifests - exclude them
-            const looksLikeHls = finalUrl.includes('.m3u8') ||
-                finalUrl.includes('m3u8') ||
-                (!finalUrl.includes('.mp4') && !finalUrl.includes('.mkv') &&
-                    !finalUrl.includes('.avi') && !finalUrl.includes('.ts'));
+            // Detect if this is likely an HLS stream (has .m3u8 in URL)
+            const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8');
 
-            // Check for raw TS streams that browsers can't play directly
+            // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
+            // This includes .ts files AND extension-less URLs that might be TS streams
             const isRawTs = finalUrl.includes('.ts') && !finalUrl.includes('.m3u8');
-            if (isRawTs) {
-                // If Force Remux is enabled, route through remux endpoint
-                if (this.settings.forceRemux) {
-                    console.log('[Player] Raw TS stream detected. Using remux to convert to MP4...');
-                    const remuxUrl = this.getRemuxUrl(streamUrl);
-                    this.video.src = remuxUrl;
-                    this.video.play().catch(e => console.log('[Player] Autoplay prevented:', e));
+            const isExtensionless = !finalUrl.includes('.m3u8') &&
+                !finalUrl.includes('.mp4') &&
+                !finalUrl.includes('.mkv') &&
+                !finalUrl.includes('.avi') &&
+                !finalUrl.includes('.ts');
 
-                    // Update UI and dispatch events
-                    this.updateNowPlaying(channel);
-                    this.showNowPlayingOverlay();
-                    this.fetchEpgData(channel);
-                    window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
-                    return;
-                }
+            // Force Remux: Route through FFmpeg for container conversion
+            // Applies to: 1) .ts streams when detected, or 2) ALL non-HLS streams when enabled
+            if (this.settings.forceRemux && (isRawTs || isExtensionless)) {
+                console.log('[Player] Force Remux enabled. Routing through FFmpeg remux...');
+                console.log('[Player] Stream type:', isRawTs ? 'Raw TS' : 'Extension-less (assumed TS)');
+                const remuxUrl = this.getRemuxUrl(streamUrl);
+                this.video.src = remuxUrl;
+                this.video.play().catch(e => console.log('[Player] Autoplay prevented:', e));
 
+                // Update UI and dispatch events
+                this.updateNowPlaying(channel);
+                this.showNowPlayingOverlay();
+                this.fetchEpgData(channel);
+                window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
+                return;
+            }
+
+            // If raw TS detected without Force Remux enabled, show error
+            if (isRawTs && !this.settings.forceRemux) {
                 console.warn('[Player] Raw MPEG-TS stream detected. Browsers cannot play .ts files directly.');
                 this.showError(
                     'This stream uses raw MPEG-TS format (.ts) which browsers cannot play directly.<br><br>' +
