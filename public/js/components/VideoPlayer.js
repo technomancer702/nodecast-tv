@@ -176,7 +176,7 @@ class VideoPlayer {
         btnMute.addEventListener('click', () => {
             this.video.muted = !this.video.muted;
             btnMute.classList.toggle('muted', this.video.muted);
-            
+
             // Update icon
             const icon = btnMute.querySelector('.icon');
             if (this.video.muted) {
@@ -231,13 +231,13 @@ class VideoPlayer {
 
             this.video.addEventListener('click', showControls);
             this.video.addEventListener('touchstart', showControls);
-            
+
             // Keep controls visible when video is paused
             this.video.addEventListener('pause', () => {
                 controls.classList.add('show');
                 clearTimeout(controlsTimeout);
             });
-            
+
             this.video.addEventListener('play', () => {
                 hideControls();
             });
@@ -469,7 +469,9 @@ class VideoPlayer {
                 // Transcoded streams are fragmented MP4 - play directly with <video> element
                 console.log('[Player] Playing transcoded stream directly:', transcodeUrl);
                 this.video.src = transcodeUrl;
-                this.video.play().catch(e => console.log('[Player] Autoplay prevented:', e));
+                this.video.play().catch(e => {
+                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+                });
 
                 // Update UI and dispatch events
                 this.updateNowPlaying(channel);
@@ -508,7 +510,9 @@ class VideoPlayer {
                 console.log('[Player] Stream type:', isRawTs ? 'Raw TS' : 'Extension-less (assumed TS)');
                 const remuxUrl = this.getRemuxUrl(streamUrl);
                 this.video.src = remuxUrl;
-                this.video.play().catch(e => console.log('[Player] Autoplay prevented:', e));
+                this.video.play().catch(e => {
+                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+                });
 
                 // Update UI and dispatch events
                 this.updateNowPlaying(channel);
@@ -537,7 +541,9 @@ class VideoPlayer {
                 this.hls.attachMedia(this.video);
 
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    this.video.play().catch(e => console.log('Autoplay prevented:', e));
+                    this.video.play().catch(e => {
+                        if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
+                    });
                 });
 
                 // Re-attach error handler for the new Hls instance
@@ -587,17 +593,22 @@ class VideoPlayer {
                 // Priority 2: Native HLS support (Safari on iOS/macOS where HLS.js may not work)
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
+                    if (e.name === 'AbortError') return; // Ignore interruption by new load
                     console.log('Autoplay prevented, trying proxy if CORS error:', e);
                     if (!this.isUsingProxy) {
                         this.isUsingProxy = true;
                         this.video.src = this.getProxiedUrl(streamUrl);
-                        this.video.play().catch(err => console.error('Proxy play failed:', err));
+                        this.video.play().catch(err => {
+                            if (err.name !== 'AbortError') console.error('Proxy play failed:', err);
+                        });
                     }
                 });
             } else {
                 // Priority 3: Try direct playback for non-HLS streams
                 this.video.src = finalUrl;
-                this.video.play().catch(e => console.log('Autoplay prevented:', e));
+                this.video.play().catch(e => {
+                    if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
+                });
             }
 
             // Update now playing info
