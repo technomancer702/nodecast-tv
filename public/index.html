@@ -280,6 +280,7 @@
             <button class="tab active" data-tab="sources">Sources</button>
             <button class="tab" data-tab="player">Player</button>
             <button class="tab" data-tab="content">Manage Content</button>
+            <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users</button>
           </div>
 
           <!-- Sources Tab -->
@@ -472,6 +473,54 @@
               <p class="hint" style="margin-bottom: var(--space-sm);">✓ Checked = Visible, ☐ Unchecked = Hidden</p>
               <div id="content-tree" class="content-tree">
                 <p class="hint">Select a source to view groups and channels</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Users Tab (Admin Only) -->
+          <div id="tab-users" class="tab-content">
+            <div class="settings-section">
+              <h3>User Management</h3>
+              <p class="hint">Manage user accounts and permissions</p>
+              
+              <div class="user-list-container">
+                <table class="user-table">
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Role</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="user-list">
+                    <tr>
+                      <td colspan="4" class="hint">Loading users...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              
+              <div class="add-user-section">
+                <h4>Add New User</h4>
+                <form id="add-user-form" class="user-form">
+                  <div class="form-group">
+                    <label for="new-username">Username</label>
+                    <input type="text" id="new-username" name="username" class="form-input" required>
+                  </div>
+                  <div class="form-group">
+                    <label for="new-password">Password</label>
+                    <input type="password" id="new-password" name="password" class="form-input" required minlength="6">
+                  </div>
+                  <div class="form-group">
+                    <label for="new-role">Role</label>
+                    <select id="new-role" name="role" class="form-input" required>
+                      <option value="viewer">Viewer</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <button type="submit" class="btn btn-primary">Add User</button>
+                </form>
               </div>
             </div>
           </div>

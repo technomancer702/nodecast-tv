@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - NodeCast TV</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--color-bg-primary);
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .login-box {
+            background: var(--color-bg-secondary);
+            padding: var(--space-2xl);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            width: 100%;
+            max-width: 420px;
+            border: 1px solid var(--color-border);
+        }
+        
+        .login-logo {
+            text-align: center;
+            margin-bottom: var(--space-2xl);
+        }
+        
+        .login-logo .logo-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto var(--space-md);
+            color: var(--color-accent);
+        }
+        
+        .login-logo h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--color-text-primary);
+            margin: 0;
+        }
+        
+        .login-logo .brand-accent {
+            color: var(--color-accent);
+        }
+        
+        .login-logo p {
+            color: var(--color-text-secondary);
+            margin: var(--space-sm) 0 0 0;
+            font-size: 14px;
+        }
+        
+        .form-group {
+            margin-bottom: var(--space-lg);
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: var(--space-sm);
+            color: var(--color-text-primary);
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--color-bg-tertiary);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            color: var(--color-text-primary);
+            font-size: 15px;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--color-accent);
+            background: var(--color-bg-hover);
+        }
+        
+        .form-group input::placeholder {
+            color: var(--color-text-muted);
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: var(--color-accent);
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 16px;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-login:hover {
+            background: var(--color-accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+        
+        .btn-login:active {
+            transform: translateY(0);
+        }
+        
+        .btn-login:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--color-error);
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            margin-bottom: var(--space-lg);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            font-size: 14px;
+            display: none;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        .setup-message {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--color-accent);
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            margin-bottom: var(--space-lg);
+            border: 1px solid var(--color-accent-dim);
+            font-size: 14px;
+            display: none;
+        }
+        
+        .setup-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <div class="login-logo">
+                <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21 6h-7.59l3.29-3.29L16 2l-4 4-4-4-.71.71L10.59 6H3a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8a2 2 0 0 0-2-2zm0 14H3V8h18v12zM9 10v8l7-4z" />
+                </svg>
+                <h1>NodeCast <span class="brand-accent">TV</span></h1>
+                <p id="login-subtitle">Sign in to continue</p>
+            </div>
+            
+            <div class="error-message" id="error-message"></div>
+            <div class="setup-message" id="setup-message">
+                Welcome! Please create your admin account to get started.
+            </div>
+            
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter your username">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password" minlength="6" placeholder="Enter your password">
+                </div>
+                
+                <button type="submit" class="btn-login" id="submit-btn">Sign In</button>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        // Check if setup is required
+        let isSetupMode = false;
+        
+        async function checkSetupRequired() {
+            try {
+                const response = await fetch('/api/auth/setup-required');
+                const data = await response.json();
+                
+                if (data.setupRequired) {
+                    isSetupMode = true;
+                    document.getElementById('login-subtitle').textContent = 'Create Admin Account';
+                    document.getElementById('submit-btn').textContent = 'Create Account';
+                    document.getElementById('setup-message').classList.add('show');
+                    document.getElementById('password').placeholder = 'Minimum 6 characters';
+                }
+            } catch (err) {
+                console.error('Error checking setup status:', err);
+            }
+        }
+        
+        // Handle form submission
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const submitBtn = document.getElementById('submit-btn');
+            const errorMessage = document.getElementById('error-message');
+            
+            // Clear previous errors
+            errorMessage.classList.remove('show');
+            errorMessage.textContent = '';
+            
+            // Disable button
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Please wait...';
+            
+            try {
+                const endpoint = isSetupMode ? '/api/auth/setup' : '/api/auth/login';
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Authentication failed');
+                }
+                
+                // Store token
+                localStorage.setItem('authToken', data.token);
+                
+                // Redirect to main app
+                window.location.href = '/';
+                
+            } catch (err) {
+                errorMessage.textContent = err.message;
+                errorMessage.classList.add('show');
+                submitBtn.disabled = false;
+                submitBtn.textContent = isSetupMode ? 'Create Account' : 'Sign In';
+            }
+        });
+        
+        // Check setup status on load
+        checkSetupRequired();
+    </script>
+</body>
+</html>

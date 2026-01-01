@@ -22,6 +22,7 @@ async function loadDb() {
         hiddenItems: data.hiddenItems || [],
         favorites: data.favorites || [],
         settings: data.settings || getDefaultSettings(),
+        users: data.users || [],
         nextId: data.nextId || 1
       };
     } catch (error) {
@@ -32,6 +33,7 @@ async function loadDb() {
           hiddenItems: [],
           favorites: [],
           settings: getDefaultSettings(),
+          users: [],
           nextId: 1
         };
       }
@@ -45,6 +47,7 @@ async function loadDb() {
       hiddenItems: [],
       favorites: [],
       settings: getDefaultSettings(),
+      users: [],
       nextId: 1
     };
   }
@@ -311,4 +314,104 @@ const settings = {
   }
 };
 
-module.exports = { sources, hiddenItems, favorites, settings, getDefaultSettings };
+// User operations
+const users = {
+  async getAll() {
+    const db = await loadDb();
+    return db.users || [];
+  },
+
+  async getById(id) {
+    const db = await loadDb();
+    return db.users?.find(u => u.id === parseInt(id));
+  },
+
+  async getByUsername(username) {
+    const db = await loadDb();
+    return db.users?.find(u => u.username === username);
+  },
+
+  async create(userData) {
+    const db = await loadDb();
+    if (!db.users) {
+      db.users = [];
+    }
+    
+    // Check if username already exists
+    if (db.users.some(u => u.username === userData.username)) {
+      throw new Error('Username already exists');
+    }
+    
+    const newUser = {
+      id: db.nextId++,
+      username: userData.username,
+      passwordHash: userData.passwordHash,
+      role: userData.role || 'viewer',
+      createdAt: new Date().toISOString()
+    };
+    
+    db.users.push(newUser);
+    await saveDb(db);
+    
+    // Return user without password hash
+    const { passwordHash, ...userWithoutPassword } = newUser;
+    return userWithoutPassword;
+  },
+
+  async update(id, updates) {
+    const db = await loadDb();
+    const userIndex = db.users?.findIndex(u => u.id === parseInt(id));
+    
+    if (userIndex === -1 || userIndex === undefined) {
+      throw new Error('User not found');
+    }
+    
+    // Check if username is being changed and if it already exists
+    if (updates.username && updates.username !== db.users[userIndex].username) {
+      if (db.users.some(u => u.username === updates.username)) {
+        throw new Error('Username already exists');
+      }
+    }
+    
+    db.users[userIndex] = {
+      ...db.users[userIndex],
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await saveDb(db);
+    
+    // Return user without password hash
+    const { passwordHash, ...userWithoutPassword } = db.users[userIndex];
+    return userWithoutPassword;
+  },
+
+  async delete(id) {
+    const db = await loadDb();
+    const userIndex = db.users?.findIndex(u => u.id === parseInt(id));
+    
+    if (userIndex === -1 || userIndex === undefined) {
+      throw new Error('User not found');
+    }
+    
+    // Prevent deleting the last admin
+    const user = db.users[userIndex];
+    if (user.role === 'admin') {
+      const adminCount = db.users.filter(u => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        throw new Error('Cannot delete the last admin user');
+      }
+    }
+    
+    db.users.splice(userIndex, 1);
+    await saveDb(db);
+    return true;
+  },
+
+  async count() {
+    const db = await loadDb();
+    return db.users?.length || 0;
+  }
+};
+
+module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings };

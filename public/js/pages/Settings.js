@@ -19,6 +19,9 @@ class SettingsPage {
 
         // Player settings
         this.initPlayerSettings();
+        
+        // User management (admin only)
+        this.initUserManagement();
     }
 
     initPlayerSettings() {
@@ -130,6 +133,99 @@ class SettingsPage {
         }
     }
 
+    initUserManagement() {
+        // User tab visibility is handled in show() method
+        // when currentUser is available
+        
+        // Handle add user form
+        const addUserForm = document.getElementById('add-user-form');
+        if (addUserForm) {
+            addUserForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const username = document.getElementById('new-username').value;
+                const password = document.getElementById('new-password').value;
+                const role = document.getElementById('new-role').value;
+                
+                try {
+                    await API.users.create({ username, password, role });
+                    alert('User created successfully!');
+                    addUserForm.reset();
+                    this.loadUsers();
+                } catch (err) {
+                    alert('Error creating user: ' + err.message);
+                }
+            });
+        }
+    }
+
+    async loadUsers() {
+        const userList = document.getElementById('user-list');
+        if (!userList) return;
+        
+        try {
+            const users = await API.users.getAll();
+            
+            if (users.length === 0) {
+                userList.innerHTML = '<tr><td colspan="4" class="hint">No users found</td></tr>';
+                return;
+            }
+            
+            userList.innerHTML = users.map(user => `
+                <tr>
+                    <td>${user.username}</td>
+                    <td><span class="badge badge-${user.role === 'admin' ? 'primary' : 'secondary'}">${user.role}</span></td>
+                    <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.editUser(${user.id})">Edit</button>
+                        <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            console.error('Error loading users:', err);
+            userList.innerHTML = '<tr><td colspan="4" class="hint">Error loading users</td></tr>';
+        }
+    }
+
+    async editUser(userId) {
+        const username = prompt('Enter new username (leave blank to keep current):');
+        const password = prompt('Enter new password (leave blank to keep current):');
+        const role = prompt('Enter role (admin or viewer, leave blank to keep current):');
+        
+        const updates = {};
+        if (username) updates.username = username;
+        if (password) updates.password = password;
+        if (role) updates.role = role;
+        
+        if (Object.keys(updates).length === 0) {
+            alert('No changes made');
+            return;
+        }
+        
+        try {
+            await API.users.update(userId, updates);
+            alert('User updated successfully!');
+            this.loadUsers();
+        } catch (err) {
+            alert('Error updating user: ' + err.message);
+        }
+    }
+
+    async deleteUser(userId, username) {
+        if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
+            return;
+        }
+        
+        try {
+            await API.users.delete(userId);
+            alert('User deleted successfully!');
+            this.loadUsers();
+        } catch (err) {
+            alert('Error deleting user: ' + err.message);
+        }
+    }
+
     switchTab(tabName) {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
@@ -138,9 +234,22 @@ class SettingsPage {
         if (tabName === 'content') {
             this.app.sourceManager.loadContentSources();
         }
+        
+        // Load users when switching to users tab
+        if (tabName === 'users') {
+            this.loadUsers();
+        }
     }
 
     async show() {
+        // Show users tab for admin
+        if (this.app.currentUser && this.app.currentUser.role === 'admin') {
+            const usersTab = document.getElementById('users-tab');
+            if (usersTab) {
+                usersTab.style.display = 'block';
+            }
+        }
+        
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
 

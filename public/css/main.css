@@ -3063,3 +3063,72 @@ kbd {
 .spin {
   animation: spin 1s linear infinite;
 }
+/* User Management Styles */
+.user-list-container {
+  margin: var(--space-lg) 0;
+  overflow-x: auto;
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.user-table thead {
+  background: var(--color-bg-tertiary);
+}
+
+.user-table th {
+  padding: var(--space-md);
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.user-table td {
+  padding: var(--space-md);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.user-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.user-table tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+.user-table .btn {
+  padding: var(--space-xs) var(--space-sm);
+  margin: 0 var(--space-xs);
+  font-size: 14px;
+}
+
+.add-user-section {
+  margin-top: var(--space-2xl);
+  padding: var(--space-lg);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.user-form {
+  display: grid;
+  gap: var(--space-md);
+  max-width: 500px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  margin-bottom: var(--space-xs);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}

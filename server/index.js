@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const passport = require('passport');
 
 // Initialize database
 require('./db');
@@ -13,6 +14,10 @@ app.set('trust proxy', true);
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
+
+// Initialize Passport
+app.use(passport.initialize());
+
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // FFMPEG Configuration (optional - for transcoding support)
@@ -49,6 +54,7 @@ function findFFmpeg() {
 app.locals.ffmpegPath = findFFmpeg();
 
 // API Routes
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sources', require('./routes/sources'));
 app.use('/api/proxy', require('./routes/proxy'));
 app.use('/api/channels', require('./routes/channels'));

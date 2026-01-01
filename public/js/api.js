@@ -13,6 +13,12 @@ const API = {
                 'Content-Type': 'application/json'
             }
         };
+        
+        // Add authentication token if available
+        const token = localStorage.getItem('authToken');
+        if (token) {
+            options.headers['Authorization'] = `Bearer ${token}`;
+        }
 
         if (data) {
             options.body = JSON.stringify(data);
@@ -30,6 +36,12 @@ const API = {
         }
 
         if (!response.ok) {
+            // If unauthorized, redirect to login
+            if (response.status === 401) {
+                localStorage.removeItem('authToken');
+                window.location.href = '/login.html';
+                return;
+            }
             throw new Error(result.error || `Server responded with ${response.status}`);
         }
 
@@ -120,6 +132,14 @@ const API = {
         update: (data) => API.request('PUT', '/settings', data),
         reset: () => API.request('DELETE', '/settings'),
         getDefaults: () => API.request('GET', '/settings/defaults')
+    },
+
+    // Users (admin only)
+    users: {
+        getAll: () => API.request('GET', '/auth/users'),
+        create: (data) => API.request('POST', '/auth/users', data),
+        update: (id, data) => API.request('PUT', `/auth/users/${id}`, data),
+        delete: (id) => API.request('DELETE', `/auth/users/${id}`)
     }
 };
 

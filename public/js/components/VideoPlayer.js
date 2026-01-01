@@ -3,6 +3,11 @@
  * Handles HLS video playback with custom controls
  */
 
+// Check if device is mobile
+function isMobile() {
+    return /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
 class VideoPlayer {
     constructor() {
         this.video = document.getElementById('video-player');
