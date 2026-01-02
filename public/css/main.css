@@ -175,13 +175,16 @@ h4 {
   align-items: center;
   justify-content: center;
   font-size: 1.75rem;
-  color: #fff;
+}
+
+.logo svg {
+  fill: var(--color-accent);
 }
 
 .brand-text {
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Century Gothic', sans-serif;
   font-size: 1.5rem;
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: -0.03em;
   color: #fff;
   /* Visual correction: shift text slightly down to align optically with icon center */
@@ -679,13 +682,13 @@ h4 {
   .video-controls {
     display: flex;
   }
-  
+
   /* Make control buttons larger on mobile */
   .video-control-btn {
     width: 56px;
     height: 56px;
   }
-  
+
   .video-control-btn .icon {
     width: 28px;
     height: 28px;
@@ -1757,12 +1760,13 @@ kbd {
 
 /* Mobile-first responsive breakpoints */
 @media (max-width: 1024px) {
+
   /* Tablet adjustments */
   :root {
     --sidebar-width: 280px;
     --epg-sidebar-width: 200px;
   }
-  
+
   .movies-grid,
   .series-grid {
     gap: var(--space-sm);
@@ -1771,6 +1775,7 @@ kbd {
 }
 
 @media (max-width: 768px) {
+
   /* Tablet/Mobile landscape */
   :root {
     --navbar-height: 56px;
@@ -2027,6 +2032,7 @@ kbd {
 }
 
 @media (max-width: 640px) {
+
   /* Mobile portrait - phones */
   :root {
     --navbar-height: 52px;
@@ -2167,7 +2173,8 @@ kbd {
   }
 
   .up-next {
-    display: none; /* Hide "Up Next" on very small screens */
+    display: none;
+    /* Hide "Up Next" on very small screens */
   }
 
   /* EPG Guide - Mobile optimized */
@@ -2311,7 +2318,8 @@ kbd {
   }
 
   .setting-info {
-    order: -1; /* Move label to top */
+    order: -1;
+    /* Move label to top */
   }
 
   .setting-label {
@@ -2436,6 +2444,7 @@ kbd {
 }
 
 @media (max-width: 480px) {
+
   /* Extra small phones */
   :root {
     --navbar-height: 48px;
@@ -2503,12 +2512,14 @@ kbd {
   }
 
   .channel-nav {
-    display: none; /* Hide channel nav in landscape to save space */
+    display: none;
+    /* Hide channel nav in landscape to save space */
   }
 }
 
 /* Touch-friendly improvements */
 @media (hover: none) and (pointer: coarse) {
+
   /* Increase touch target sizes */
   .btn,
   .nav-link,
@@ -2516,7 +2527,8 @@ kbd {
   .movie-card,
   .series-card,
   .tab {
-    min-height: 44px; /* iOS recommended touch target */
+    min-height: 44px;
+    /* iOS recommended touch target */
   }
 
   .channel-item {
@@ -3063,6 +3075,7 @@ kbd {
 .spin {
   animation: spin 1s linear infinite;
 }
+
 /* User Management Styles */
 .user-list-container {
   margin: var(--space-lg) 0;

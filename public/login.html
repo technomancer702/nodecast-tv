@@ -1,19 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - NodeCast TV</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="css/main.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
             padding: 0;
             background: var(--color-bg-primary);
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         }
-        
+
         .login-container {
             display: flex;
             flex-direction: column;
@@ -22,7 +24,7 @@
             min-height: 100vh;
             padding: 20px;
         }
-        
+
         .login-box {
             background: var(--color-bg-secondary);
             padding: var(--space-2xl);
@@ -32,40 +34,41 @@
             max-width: 420px;
             border: 1px solid var(--color-border);
         }
-        
+
         .login-logo {
             text-align: center;
             margin-bottom: var(--space-2xl);
         }
-        
+
         .login-logo .logo-icon {
             width: 64px;
             height: 64px;
             margin: 0 auto var(--space-md);
             color: var(--color-accent);
         }
-        
+
         .login-logo h1 {
+            font-family: 'Century Gothic', sans-serif;
             font-size: 28px;
-            font-weight: 700;
+            font-weight: 500;
             color: var(--color-text-primary);
             margin: 0;
         }
-        
+
         .login-logo .brand-accent {
             color: var(--color-accent);
         }
-        
+
         .login-logo p {
             color: var(--color-text-secondary);
             margin: var(--space-sm) 0 0 0;
             font-size: 14px;
         }
-        
+
         .form-group {
             margin-bottom: var(--space-lg);
         }
-        
+
         .form-group label {
             display: block;
             margin-bottom: var(--space-sm);
@@ -73,7 +76,7 @@
             font-weight: 500;
             font-size: 14px;
         }
-        
+
         .form-group input {
             width: 100%;
             padding: 12px 16px;
@@ -86,17 +89,17 @@
             transition: all 0.2s;
             box-sizing: border-box;
         }
-        
+
         .form-group input:focus {
             outline: none;
             border-color: var(--color-accent);
             background: var(--color-bg-hover);
         }
-        
+
         .form-group input::placeholder {
             color: var(--color-text-muted);
         }
-        
+
         .btn-login {
             width: 100%;
             padding: 14px;
@@ -110,23 +113,23 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        
+
         .btn-login:hover {
             background: var(--color-accent-hover);
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
         }
-        
+
         .btn-login:active {
             transform: translateY(0);
         }
-        
+
         .btn-login:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
-        
+
         .error-message {
             background: rgba(239, 68, 68, 0.1);
             color: var(--color-error);
@@ -137,11 +140,11 @@
             font-size: 14px;
             display: none;
         }
-        
+
         .error-message.show {
             display: block;
         }
-        
+
         .setup-message {
             background: rgba(99, 102, 241, 0.1);
             color: var(--color-accent);
@@ -152,53 +155,58 @@
             font-size: 14px;
             display: none;
         }
-        
+
         .setup-message.show {
             display: block;
         }
     </style>
 </head>
+
 <body>
     <div class="login-container">
         <div class="login-box">
             <div class="login-logo">
-                <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M21 6h-7.59l3.29-3.29L16 2l-4 4-4-4-.71.71L10.59 6H3a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8a2 2 0 0 0-2-2zm0 14H3V8h18v12zM9 10v8l7-4z" />
+                <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 187.63 210.6"
+                    fill="currentColor">
+                    <path
+                        d="M169.71,87.87c-4.77,0-9.1,1.88-12.31,4.92L35.3,22.3c.35-1.4.56-2.86.56-4.37C35.86,8.03,27.83,0,17.93,0S0,8.03,0,17.93c0,8.44,5.84,15.5,13.69,17.4v140c-7.71,2.01-13.41,8.99-13.41,17.33,0,9.9,8.03,17.93,17.93,17.93s17.93-8.03,17.93-17.93c0-1.56-.22-3.07-.6-4.51l121.21-69.98c3.26,3.42,7.86,5.55,12.95,5.55,9.9,0,17.93-8.03,17.93-17.93s-8.03-17.93-17.93-17.93ZM152.78,99.92c-.14.41-.27.83-.38,1.25h-51.47l-44.18-24.72L30.4,30.8c.33-.32.64-.65.94-.99l121.45,70.12ZM22.17,175.2V35.33c.23-.05.45-.11.67-.17l26.35,45.65-.34,50.04-25.74,44.59c-.31-.09-.63-.17-.95-.24ZM31.52,180.69c-.27-.3-.55-.6-.84-.89l25.48-44.13,44.64-25.78h51.47c.07.32.15.63.24.94L31.52,180.69Z" />
                 </svg>
-                <h1>NodeCast <span class="brand-accent">TV</span></h1>
+                <h1>nodecast-tv</h1>
                 <p id="login-subtitle">Sign in to continue</p>
             </div>
-            
+
             <div class="error-message" id="error-message"></div>
             <div class="setup-message" id="setup-message">
                 Welcome! Please create your admin account to get started.
             </div>
-            
+
             <form id="login-form">
                 <div class="form-group">
                     <label for="username">Username</label>
-                    <input type="text" id="username" name="username" required autocomplete="username" placeholder="Enter your username">
+                    <input type="text" id="username" name="username" required autocomplete="username"
+                        placeholder="Enter your username">
                 </div>
-                
+
                 <div class="form-group">
                     <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required autocomplete="current-password" minlength="6" placeholder="Enter your password">
+                    <input type="password" id="password" name="password" required autocomplete="current-password"
+                        minlength="6" placeholder="Enter your password">
                 </div>
-                
+
                 <button type="submit" class="btn-login" id="submit-btn">Sign In</button>
             </form>
         </div>
     </div>
-    
+
     <script>
         // Check if setup is required
         let isSetupMode = false;
-        
+
         async function checkSetupRequired() {
             try {
                 const response = await fetch('/api/auth/setup-required');
                 const data = await response.json();
-                
+
                 if (data.setupRequired) {
                     isSetupMode = true;
                     document.getElementById('login-subtitle').textContent = 'Create Admin Account';
@@ -210,24 +218,24 @@
                 console.error('Error checking setup status:', err);
             }
         }
-        
+
         // Handle form submission
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             const submitBtn = document.getElementById('submit-btn');
             const errorMessage = document.getElementById('error-message');
-            
+
             // Clear previous errors
             errorMessage.classList.remove('show');
             errorMessage.textContent = '';
-            
+
             // Disable button
             submitBtn.disabled = true;
             submitBtn.textContent = 'Please wait...';
-            
+
             try {
                 const endpoint = isSetupMode ? '/api/auth/setup' : '/api/auth/login';
                 const response = await fetch(endpoint, {
@@ -237,19 +245,19 @@
                     },
                     body: JSON.stringify({ username, password })
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (!response.ok) {
                     throw new Error(data.error || 'Authentication failed');
                 }
-                
+
                 // Store token
                 localStorage.setItem('authToken', data.token);
-                
+
                 // Redirect to main app
                 window.location.href = '/';
-                
+
             } catch (err) {
                 errorMessage.textContent = err.message;
                 errorMessage.classList.add('show');
@@ -257,9 +265,10 @@
                 submitBtn.textContent = isSetupMode ? 'Create Account' : 'Sign In';
             }
         });
-        
+
         // Check setup status on load
         checkSetupRequired();
     </script>
 </body>
+
 </html>
