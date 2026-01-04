@@ -1,5 +1,6 @@
 services:
   nodecast-tv:
+    image: ghcr.io/technomancer702/nodecast-tv:latest
     build: https://github.com/technomancer702/nodecast-tv.git#main
     container_name: nodecast-tv
     ports:
