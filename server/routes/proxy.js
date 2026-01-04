@@ -255,6 +255,7 @@ router.post('/epg/:sourceId/channels', async (req, res) => {
 /**
  * Proxy stream for playback
  * This handles CORS for streams that don't allow cross-origin
+ * Supports HTTP Range requests for video seeking
  */
 router.get('/stream', async (req, res) => {
     const maxRetries = 2;
@@ -279,6 +280,12 @@ router.get('/stream', async (req, res) => {
                 'Referer': isPluto ? 'https://pluto.tv/' : new URL(url).origin + '/'
             };
 
+            // Forward Range header for video seeking support
+            const rangeHeader = req.get('range');
+            if (rangeHeader) {
+                headers['Range'] = rangeHeader;
+            }
+
             const response = await fetch(url, { headers });
 
             // Retry on 5xx errors (transient upstream issues)
@@ -299,6 +306,28 @@ router.get('/stream', async (req, res) => {
 
             const contentType = response.headers.get('content-type') || '';
             res.set('Access-Control-Allow-Origin', '*');
+            
+            // Forward range-related headers for video seeking support
+            const contentLength = response.headers.get('content-length');
+            const contentRange = response.headers.get('content-range');
+            const acceptRanges = response.headers.get('accept-ranges');
+            
+            if (contentLength) {
+                res.set('Content-Length', contentLength);
+            }
+            if (contentRange) {
+                res.set('Content-Range', contentRange);
+            }
+            if (acceptRanges) {
+                res.set('Accept-Ranges', acceptRanges);
+            } else if (contentLength && !contentRange) {
+                // If server supports content-length but didn't explicitly state accept-ranges,
+                // we can safely assume it supports byte ranges
+                res.set('Accept-Ranges', 'bytes');
+            }
+            
+            // Set status code (206 for partial content when range request was made)
+            res.status(response.status);
 
             // Create an async iterator for the response body
             const iterator = response.body[Symbol.asyncIterator]();
