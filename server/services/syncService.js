@@ -471,6 +471,8 @@ class SyncService {
                 category_id: ch.groupTitle || 'Uncategorized',
                 stream_icon: ch.tvgLogo,
                 stream_url: ch.url,
+                // Include tvgId for EPG matching (stored in data JSON blob)
+                tvgId: ch.tvgId || null,
             }));
 
             // Save this batch immediately
