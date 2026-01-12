@@ -16,6 +16,7 @@ class ChannelList {
         this.groups = [];
         this.hiddenItems = new Set(); // Set<"type:sourceId:itemId">
         this.collapsedGroups = new Set(); // Track collapsed groups
+        this._userExpandedGroups = new Set(); // Track groups user has explicitly expanded
         this.favorites = []; // Array of favorite objects
         this.visibleFavorites = new Set(); // Set<"sourceId:channelId">
         this.currentChannel = null;
@@ -48,9 +49,13 @@ class ChannelList {
             const saved = localStorage.getItem('nodecast_tv_collapsed_groups');
             if (saved) {
                 this.collapsedGroups = new Set(JSON.parse(saved));
+                this._hasCollapsedState = true;
+            } else {
+                this._hasCollapsedState = false; // First load - will collapse all by default
             }
         } catch (err) {
             console.error('Error loading collapsed state:', err);
+            this._hasCollapsedState = false;
         }
     }
 
@@ -71,8 +76,12 @@ class ChannelList {
     toggleGroup(groupName) {
         if (this.collapsedGroups.has(groupName)) {
             this.collapsedGroups.delete(groupName);
+            // Track that user explicitly expanded this group
+            this._userExpandedGroups.add(groupName);
         } else {
             this.collapsedGroups.add(groupName);
+            // User collapsed it, remove from expanded tracking
+            this._userExpandedGroups.delete(groupName);
         }
         this.saveCollapsedState();
     }
@@ -83,7 +92,17 @@ class ChannelList {
     expandAll() {
         this.collapsedGroups.clear();
         this.saveCollapsedState();
-        this.container.querySelectorAll('.group-header.collapsed').forEach(h => h.classList.remove('collapsed'));
+
+        // Expand all and render channels for empty containers
+        this.container.querySelectorAll('.group-header.collapsed').forEach(h => {
+            h.classList.remove('collapsed');
+            const groupName = h.dataset.group;
+            const groupEl = h.closest('.channel-group');
+            const channelsContainer = groupEl?.querySelector('.group-channels');
+            if (channelsContainer && channelsContainer.children.length === 0) {
+                this.renderGroupChannels(groupName, channelsContainer);
+            }
+        });
 
         // Update toggle button
         if (this.toggleGroupsBtn) {
@@ -334,6 +353,18 @@ class ChannelList {
         this.groupedChannels = groupedChannels;
         this.showHidden = showHidden;
 
+        // Collapse all groups by default on first load (for large playlists)
+        // This prevents rendering 100K+ channel items on initial load
+        if (!this._hasCollapsedState && this.sortedGroups.length > 0) {
+            this.sortedGroups.forEach(groupName => {
+                if (groupName !== 'Favorites') {
+                    this.collapsedGroups.add(groupName);
+                }
+            });
+            this._hasCollapsedState = true;
+            this.saveCollapsedState();
+        }
+
         // Build rendered channel list for navigation (matches visual order)
         this.renderedChannels = [];
         this.sortedGroups.forEach(groupName => {
@@ -431,6 +462,12 @@ class ChannelList {
             // Skip group if no visible channels (derived visibility)
             if (visibleChannels.length === 0) continue;
 
+            // Default new groups to collapsed (except Favorites)
+            // This handles groups loaded via scroll that weren't in the initial collapse
+            if (!isFavoritesGroup && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
+                this.collapsedGroups.add(groupName);
+            }
+
             html += `
         <div class="channel-group">
           <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${groupName}">
@@ -440,6 +477,13 @@ class ChannelList {
           </div>
           <div class="group-channels">
       `;
+
+            // Skip rendering channel items if group is collapsed (major performance optimization)
+            // Channels will be rendered when user expands the group
+            if (this.collapsedGroups.has(groupName)) {
+                html += '</div></div>';
+                continue;
+            }
 
 
             for (const channel of visibleChannels) {
@@ -501,13 +545,89 @@ class ChannelList {
         const header = groupEl.querySelector('.group-header');
         if (header) {
             header.addEventListener('click', () => {
+                const groupName = header.dataset.group;
+                const isCollapsed = header.classList.contains('collapsed');
+
                 header.classList.toggle('collapsed');
-                this.toggleGroup(header.dataset.group);
+                this.toggleGroup(groupName);
+
+                // If expanding, render channels if they weren't rendered initially
+                if (isCollapsed) {
+                    const channelsContainer = groupEl.querySelector('.group-channels');
+                    if (channelsContainer && channelsContainer.children.length === 0) {
+                        // Channels weren't rendered - render them now
+                        this.renderGroupChannels(groupName, channelsContainer);
+                    }
+                }
             });
             header.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'group', header.dataset));
         }
 
         groupEl.querySelectorAll('.channel-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.favorite-btn')) return;
+                this.selectChannel(item.dataset);
+            });
+            item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
+
+            const favBtn = item.querySelector('.favorite-btn');
+            if (favBtn) {
+                favBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
+                });
+            }
+        });
+    }
+
+    /**
+     * Render channels for a specific group (called when expanding a collapsed group)
+     */
+    renderGroupChannels(groupName, container) {
+        const channels = this.groupedChannels[groupName];
+        if (!channels || channels.length === 0) return;
+
+        const isFavoritesGroup = groupName === 'Favorites';
+
+        // Filter visible channels
+        const visibleChannels = channels.filter(channel => {
+            if (isFavoritesGroup) return true;
+            const rawChannelId = channel.streamId || channel.id;
+            const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
+            return !channelHidden || this.showHidden;
+        });
+
+        let html = '';
+        for (const channel of visibleChannels) {
+            const rawChannelId = channel.streamId || channel.id;
+            const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
+            const isActive = this.currentChannel?.id === channel.id;
+            const isFavorite = this.isFavorite(channel.sourceId, channel.id);
+
+            html += `
+          <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''}" 
+               data-channel-id="${channel.id}"
+               data-source-id="${channel.sourceId}"
+               data-source-type="${channel.sourceType}"
+               data-stream-id="${channel.streamId || ''}"
+               data-url="${channel.url || ''}">
+            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
+                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <div class="channel-info">
+              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
+              <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
+            </div>
+            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
+              ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
+            </button>
+          </div>
+        `;
+        }
+
+        container.innerHTML = html;
+
+        // Attach listeners to the new channel items
+        container.querySelectorAll('.channel-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.favorite-btn')) return;
                 this.selectChannel(item.dataset);
