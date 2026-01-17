@@ -106,6 +106,31 @@ class WatchPage {
         const pipBtn = document.getElementById('watch-pip');
         pipBtn?.addEventListener('click', () => this.togglePictureInPicture());
 
+        // Overflow Menu
+        const overflowBtn = document.getElementById('watch-overflow');
+        const overflowMenu = document.getElementById('watch-overflow-menu');
+
+        overflowBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            overflowMenu?.classList.toggle('hidden');
+        });
+
+        // Copy Stream URL
+        const copyUrlBtn = document.getElementById('watch-copy-url');
+        copyUrlBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.copyStreamUrl();
+            overflowMenu?.classList.add('hidden');
+        });
+
+        // Close overflow menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (overflowMenu && !overflowMenu.classList.contains('hidden') &&
+                !overflowMenu.contains(e.target) && e.target !== overflowBtn) {
+                overflowMenu.classList.add('hidden');
+            }
+        });
+
         // Progress bar
         this.progressSlider?.addEventListener('input', (e) => this.seek(e.target.value));
 
@@ -210,6 +235,9 @@ class WatchPage {
     }
 
     async loadVideo(url) {
+        // Store the URL for copy functionality
+        this.currentUrl = url;
+
         // Stop any existing playback
         this.stop();
 
@@ -426,6 +454,37 @@ class WatchPage {
                 console.error('Picture-in-Picture error:', err);
             }
         }
+    }
+
+    /**
+     * Copy current stream URL to clipboard
+     */
+    copyStreamUrl() {
+        if (!this.currentUrl) {
+            console.warn('[WatchPage] No stream URL to copy');
+            return;
+        }
+
+        let streamUrl = this.currentUrl;
+
+        // If it's a relative URL, make it absolute
+        if (streamUrl.startsWith('/')) {
+            streamUrl = window.location.origin + streamUrl;
+        }
+
+        navigator.clipboard.writeText(streamUrl).then(() => {
+            // Show brief feedback
+            const btn = document.getElementById('watch-copy-url');
+            if (btn) {
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
+                }, 1500);
+            }
+            console.log('[WatchPage] Stream URL copied:', streamUrl);
+        }).catch(() => {
+            prompt('Copy this URL:', streamUrl);
+        });
     }
 
     // === UI Updates ===

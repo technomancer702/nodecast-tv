@@ -360,6 +360,93 @@ h4 {
   border-bottom: 1px solid var(--color-border);
 }
 
+.sidebar-header-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.sidebar-header-row .search-wrapper {
+  flex: 1;
+}
+
+.sidebar-collapse-btn {
+  display: none;
+  /* Hidden on mobile */
+  flex-shrink: 0;
+  padding: var(--space-xs);
+}
+
+.sidebar-collapse-btn .icon {
+  transition: transform 0.2s ease;
+}
+
+/* Desktop collapse button visibility */
+@media (min-width: 769px) {
+  .sidebar-collapse-btn {
+    display: flex;
+  }
+}
+
+/* Collapsed sidebar state (desktop only) */
+.channel-sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+.channel-sidebar.collapsed .sidebar-header,
+.channel-sidebar.collapsed .channel-list {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* Expand button when sidebar is collapsed */
+.sidebar-expand-btn {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(var(--navbar-height) + var(--space-md));
+  z-index: 50;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-left: none;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: var(--space-sm);
+  cursor: pointer;
+  color: var(--color-text-primary);
+  transition: opacity 0.3s ease, background var(--transition-fast);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-expand-btn .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Show expand button when sidebar is collapsed */
+.home-layout.sidebar-collapsed .sidebar-expand-btn {
+  display: flex;
+}
+
+/* Fade in expand button with player controls */
+.home-layout.sidebar-collapsed .sidebar-expand-btn.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Smooth transitions */
+.channel-sidebar {
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
 .search-input {
   width: 100%;
   padding: var(--space-sm) var(--space-md);
@@ -3888,4 +3975,47 @@ kbd {
   .next-info h4 {
     max-width: none;
   }
+}
+
+/* Player Overflow Menu */
+.player-overflow-wrapper {
+  position: relative;
+}
+
+.player-overflow-menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: var(--space-sm);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  min-width: 180px;
+  overflow: hidden;
+  z-index: 100;
+}
+
+.overflow-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.overflow-menu-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.overflow-menu-item .icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }

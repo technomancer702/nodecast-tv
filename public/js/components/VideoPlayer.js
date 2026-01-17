@@ -275,14 +275,41 @@ class VideoPlayer {
             this.togglePictureInPicture();
         });
 
+        // Overflow Menu
+        const btnOverflow = document.getElementById('btn-overflow');
+        const overflowMenu = document.getElementById('player-overflow-menu');
+
+        btnOverflow?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            overflowMenu?.classList.toggle('hidden');
+        });
+
+        // Copy Stream URL
+        const btnCopyUrl = document.getElementById('btn-copy-url');
+        btnCopyUrl?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.copyStreamUrl();
+            overflowMenu?.classList.add('hidden');
+        });
+
+        // Close overflow menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (overflowMenu && !overflowMenu.classList.contains('hidden') &&
+                !overflowMenu.contains(e.target) && e.target !== btnOverflow) {
+                overflowMenu.classList.add('hidden');
+            }
+        });
+
         this.container.addEventListener('dblclick', () => this.toggleFullscreen());
 
         // Overlay Auto-hide Logic
         let overlayTimeout;
+        const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
 
         const showOverlay = () => {
             this.controlsOverlay.classList.remove('hidden');
             this.container.style.cursor = 'default';
+            sidebarExpandBtn?.classList.add('visible');
             resetOverlayTimer();
         };
 
@@ -290,6 +317,7 @@ class VideoPlayer {
             if (!this.video.paused) {
                 this.controlsOverlay.classList.add('hidden');
                 this.container.style.cursor = 'none';
+                sidebarExpandBtn?.classList.remove('visible');
             }
         };
 
@@ -351,6 +379,37 @@ class VideoPlayer {
         }
     }
 
+    /**
+     * Copy current stream URL to clipboard
+     */
+    copyStreamUrl() {
+        if (!this.currentUrl) {
+            console.warn('[Player] No stream URL to copy');
+            return;
+        }
+
+        let streamUrl = this.currentUrl;
+
+        // If it's a relative URL, make it absolute
+        if (streamUrl.startsWith('/')) {
+            streamUrl = window.location.origin + streamUrl;
+        }
+
+        navigator.clipboard.writeText(streamUrl).then(() => {
+            // Show brief feedback
+            const btn = document.getElementById('btn-copy-url');
+            if (btn) {
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
+                }, 1500);
+            }
+            console.log('[Player] Stream URL copied:', streamUrl);
+        }).catch(() => {
+            prompt('Copy this URL:', streamUrl);
+        });
+    }
 
 
     /**

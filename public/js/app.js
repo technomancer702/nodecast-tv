@@ -82,6 +82,29 @@ class App {
             });
         }
 
+        // Desktop sidebar collapse toggle
+        const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
+        const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
+        const homeLayout = document.querySelector('.home-layout');
+
+        const toggleSidebarCollapse = () => {
+            channelSidebar?.classList.toggle('collapsed');
+            homeLayout?.classList.toggle('sidebar-collapsed');
+
+            // Persist preference
+            const isCollapsed = channelSidebar?.classList.contains('collapsed');
+            localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
+        };
+
+        sidebarCollapseBtn?.addEventListener('click', toggleSidebarCollapse);
+        sidebarExpandBtn?.addEventListener('click', toggleSidebarCollapse);
+
+        // Restore sidebar state from localStorage
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            channelSidebar?.classList.add('collapsed');
+            homeLayout?.classList.add('sidebar-collapsed');
+        }
+
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
