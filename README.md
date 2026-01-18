@@ -26,8 +26,8 @@ nodecast-tv is a modern, web-based IPTV player featuring Live TV, EPG, Movies (V
 ## Screenshots
 
 <div align="center">
-  <img src="public/img/screenshots/screenshot-2.png" width="45%" alt="Screenshot 2" />
   <img src="public/img/screenshots/screenshot-1.png" width="45%" alt="Screenshot 1" />
+  <img src="public/img/screenshots/screenshot-2.png" width="45%" alt="Screenshot 2" />
   <img src="public/img/screenshots/screenshot-3.png" width="45%" alt="Screenshot 3" />
   <img src="public/img/screenshots/screenshot-4.png" width="45%" alt="Screenshot 4" />
 </div>
@@ -87,6 +87,36 @@ You can run nodecast-tv easily using Docker.
 
 The application will be available at `http://localhost:3000`.
 
+
+### Hardware Acceleration Setup
+
+To enable hardware transcoding (NVENC, QSV, VAAPI), you must expose your host's GPU to the container.
+
+**1. Intel (QSV) & AMD (VAAPI)**
+Update your `docker-compose.yml` to map the DRI devices and add necessary groups (often required for permission):
+```yaml
+    devices:
+      - /dev/dri:/dev/dri # Required for VAAPI/QuickSync/AMF (Linux)
+    # group_add:       # Optional: Needed mainly if you run as non-root
+    #   - "video"      # Run on host: getent group video
+    #   - "render"     # Run on host: getent group render
+```
+
+**2. NVIDIA (NVENC)**
+Ensure you have the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on your host, then update your `docker-compose.yml`:
+```yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+**Verify:**
+After restarting the container, go to **Settings -> Transcoding**. The **Hardware Detection** status should list your GPU (e.g., "NVIDIA GPU Detected" or "VAAPI Available").
+
 ### Usage
 
 1.  Go to **Settings** -> **Content Sources**.
@@ -95,42 +125,29 @@ The application will be available at `http://localhost:3000`.
 4.  Navigate to **Live TV**, **Movies**, or **Series** to browse your content.
 
 
-## Browser Codec Support
+## Browser Codec Support & Transcoding
 
-nodecast-tv is a web-based application. By default, **video decoding is handled by your browser**. However, nodecast-tv includes optional **server-side transcoding** to convert incompatible codecs (HEVC, Dolby) to browser-friendly formats (H.264, AAC).
+nodecast-tv is a web-based application. By default, **video decoding is handled by your browser**. However, the built-in **smart transcoding system** automatically converts incompatible media (e.g., HEVC video, Dolby audio) into browser-friendly formats using FFmpeg.
 
-Without transcoding enabled, codec support depends on what your browser can decode natively:
+**Codec Compatibility Table:**
 
 | Codec | Chrome | Firefox | Safari | Edge |
 |-------|--------|---------|--------|------|
 | **H.264 (AVC)** | ✅ | ✅ | ✅ | ✅ |
-| **H.265 (HEVC)** | ❌¹ | ❌ | ✅ | ⚠️² |
-| **VP9** | ✅ | ✅ | ⚠️³ | ✅ |
+| **H.265 (HEVC)** | Auto-Transcode | Auto-Transcode | ✅ | ⚠️ |
 | **AV1** | ✅ | ✅ | ❌ | ✅ |
 | **AAC Audio** | ✅ | ✅ | ✅ | ✅ |
-| **AC3/EAC3 (Dolby)** | ❌ | ❌ | ✅ | ❌ |
-| **MP3 Audio** | ✅ | ✅ | ✅ | ✅ |
+| **AC3/EAC3 (Dolby)** | Auto-Transcode | Auto-Transcode | ✅ | Auto-Transcode |
 
-**Notes:**
-1. Chrome may support HEVC on macOS with hardware decoder
-2. Edge requires the paid "HEVC Video Extensions" from Microsoft Store ($0.99)
-3. Safari VP9 support varies by device/version
+> **⚠️ Note:** Edge requires the [HEVC Video Extensions](https://apps.microsoft.com/store/detail/hevc-video-extensions/9NMZLZ57R3T7) from the Microsoft Store to play H.265 (HEVC) natively. If missing, Auto-Transcode will handle it.
 
 **If a stream doesn't play:**
-- The stream codec may not be supported by your browser
-- Try a different browser (Safari for HEVC/Dolby, Chrome/Edge for VP9/AV1)
-- Check if your IPTV provider offers alternative stream formats
-- For Dolby audio issues, enable **"Force Audio Transcode"** in Settings → Transcoding
+1.  Ensure **"Auto Transcode"** is enabled in **Settings → Transcoding**.
+2.  If you have video but no audio, check that **"Force Audio Transcode"** is enabled (it should trigger automatically).
+3.  If buffering persists, try switching the **Hardware Encoder** setting or reducing the **Max Transcode Resolution**.
 
-### Audio Transcoding
-
-For streams with Dolby Digital (AC3/EAC3) audio that browsers can't decode natively:
-
-1. Install FFmpeg support: `npm install ffmpeg-static` (included as optional dependency)
-2. Enable **"Force Audio Transcode"** in Settings → Transcoding → Stream Processing
-3. Audio will be transcoded to AAC while video passes through unchanged
-
-**Note:** For ad-stitched live streams (like Pluto TV), transcoding may struggle to keep up. These streams typically use AAC audio already, so the built-in HLS discontinuity handling manages audio transitions without transcoding.
+**Note on Ad-Stitched Streams:**
+For channels like Pluto TV, the player handles audio discontinuities automatically. Transcoding is rarely needed unless the base codec is incompatible.
 
 ## Supported Stream Types
 
@@ -188,22 +205,21 @@ All transcoding and stream processing settings are found in **Settings → Trans
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
 | Black screen, `Access-Control-Allow-Origin` error | CORS blocked | Enable **"Force Backend Proxy"** in Settings → Transcoding |
-| Black screen with `MEDIA_ERR_DECODE` or `fragParsingError` | Unsupported codec (likely HEVC) | Try a different browser (see Codec Support table) |
-| Loading forever (no error) | Decoder hung on unsupported codec | Try Safari or Edge; stream likely uses HEVC |
+| Black screen with `MEDIA_ERR_DECODE` | Unsupported codec (HEVC/VP9) | Ensure **"Auto Transcode"** is enabled |
+| Loading forever (no error) | Browser decoder stuck | Enable **"Force Video Transcode"** (overrides Auto detection) |
 
 ### No Audio (Video Plays Fine)
 
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
-| No audio at all | Dolby/AC3/EAC3 audio | Enable **"Force Audio Transcode"** in Settings → Transcoding |
-| No audio on some channels | Codec mismatch | Try Safari (best Dolby support) or enable transcoding |
+| No audio at all | Dolby/AC3/EAC3 audio | Enable **"Force Audio Transcode"** (overrides Auto detection) |
 | Audio out of sync | Stream encoding issue | Try changing stream format to TS in Settings |
 
 ### Buffering Issues
 
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
-| Constant buffering | Slow network or provider | Try TS format instead of HLS in Settings |
+| Constant buffering | Slow network or weak GPU | 1. Lower **Max Resolution** (e.g. to 720p)<br>2. Try **TS** format instead of HLS |
 
 ### HTTPS / Reverse Proxy Issues
 
@@ -242,59 +258,14 @@ location / {
 }
 ```
 
-### IPTV Middleware (m3u-editor, dispatcharr, Threadfin, etc.)
+### IPTV Middleware (m3u-editor, dispatcharr, Threadfin, xTeVe)
+If you manage your streams with middleware tools, you may encounter CORS issues or raw MPEG-TS streams that browsers can't play directly.
 
-If you're using IPTV middleware like **m3u-editor**, **dispatcharr**, **Threadfin**, or **xTeVe** to manage your streams, you may need to adjust nodecast-tv settings for optimal playback. These tools typically use passthrough mode, which preserves original codecs (like HEVC/Dolby) that most browsers cannot decode natively, and may also trigger CORS restrictions.
+**Recommended Setup:**
+1.  **Force Backend Proxy:** Enable this in **Settings → Transcoding → Network**. This routes middleware streams through NodeCast TV, bypassing CORS restrictions.
+2.  **Auto Transcode:** Keep this enabled (default). It will automatically detect if the middleware stream (e.g., MPEG-TS) needs to be remuxed or transcoded for the browser.
 
-**Recommended Settings in nodecast-tv:**
-
-| Setting | Location | When to Enable |
-|---------|----------|----------------|
-| **Force Backend Proxy** | Settings → Transcoding → Network | Always recommended when using middleware |
-| **Force Remux** | Settings → Transcoding → Stream Processing | For raw `.ts` streams (lightweight, no re-encoding) |
-| **Force Audio Transcode** | Settings → Transcoding → Stream Processing | If you have no audio (Dolby/AC3/EAC3 streams) |
-
----
-
-#### m3u-editor (sparkison/m3u-editor)
-
-m3u-editor includes an internal proxy that remuxes streams to MPEG-TS. 
-
-**Setup:**
-1. In m3u-editor, configure your playlist and enable the proxy if needed
-2. In nodecast-tv, enable **"Force Remux"** in Settings → Transcoding (for raw .ts streams)
-3. If audio doesn't play, enable **"Force Audio Transcode"** instead
-
-**Note:** m3u-editor's proxy preserves original codecs. If your source has HEVC or Dolby, you'll need transcoding or a compatible browser (Safari).
-
----
-
-#### dispatcharr
-
-dispatcharr uses FFmpeg stream profiles to process streams. By default it outputs MPEG-TS with passthrough codecs.
-
-**Setup:**
-1. In dispatcharr, streams are proxied by default via stream profiles
-2. In nodecast-tv, enable **"Force Remux"** in Settings → Transcoding (for raw .ts streams)
-3. If audio doesn't play, enable **"Force Audio Transcode"** instead
-
-**Custom dispatcharr profile for browser compatibility:**
-If you want dispatcharr to transcode audio for you instead of nodecast-tv:
-```
--user_agent {userAgent} -i {streamUrl} -c:v copy -c:a aac -f mpegts pipe:1
-```
-This keeps video passthrough but converts audio to AAC.
-
----
-
-#### Threadfin / xTeVe
-
-These HDHomeRun emulators work similarly to other middleware.
-
-**Setup:**
-1. Add your Threadfin/xTeVe M3U URL as an M3U source in nodecast-tv
-2. Enable **"Force Remux"** in Settings → Transcoding (for raw .ts streams)
-3. If needed, enable **"Force Audio Transcode"** instead for Dolby audio
+There is rarely a need to configure specific "Force Remux" settings manually anymore; the system detects stream types automatically.
 
 ### TVHeadend
 
