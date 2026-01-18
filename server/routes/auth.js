@@ -13,6 +13,11 @@ auth.configureJwtStrategy(
     async (id) => await db.users.getById(id)
 );
 
+// Configure Passport session serialization (required for OIDC)
+auth.configureSessionSerialization(
+    async (id) => await db.users.getById(id)
+);
+
 // Configure OIDC Strategy
 auth.configureOidcStrategy(
     async (oidcId) => await db.users.getByOidcId(oidcId),

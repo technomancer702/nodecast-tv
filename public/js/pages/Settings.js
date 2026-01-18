@@ -303,52 +303,165 @@ class SettingsPage {
 
         try {
             const users = await API.users.getAll();
+            // Store users in memory for easy access during edit
+            this.users = users;
 
             if (users.length === 0) {
-                userList.innerHTML = '<tr><td colspan="4" class="hint">No users found</td></tr>';
+                userList.innerHTML = '<tr><td colspan="5" class="hint">No users found</td></tr>';
                 return;
             }
 
-            userList.innerHTML = users.map(user => `
+            userList.innerHTML = users.map(user => {
+                const isSSO = !!user.oidcId;
+                const typeBadge = isSSO
+                    ? '<span class="user-badge user-badge-sso">SSO</span>'
+                    : '<span class="user-badge user-badge-local">Local</span>';
+
+                const roleBadge = user.role === 'admin'
+                    ? '<span class="user-badge user-badge-admin">Admin</span>'
+                    : '<span class="user-badge user-badge-viewer">Viewer</span>';
+
+                return `
                 <tr>
-                    <td>${user.username}</td>
-                    <td><span class="badge badge-${user.role === 'admin' ? 'primary' : 'secondary'}">${user.role}</span></td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <strong>${user.username}</strong>
+                            ${typeBadge}
+                        </div>
+                    </td>
+                    <td>${user.email || '<span class="hint">-</span>'}</td>
+                    <td>${roleBadge}</td>
                     <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.editUser(${user.id})">Edit</button>
+                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
                         <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
         } catch (err) {
             console.error('Error loading users:', err);
-            userList.innerHTML = '<tr><td colspan="4" class="hint">Error loading users</td></tr>';
+            userList.innerHTML = '<tr><td colspan="5" class="hint">Error loading users</td></tr>';
         }
     }
 
-    async editUser(userId) {
-        const username = prompt('Enter new username (leave blank to keep current):');
-        const password = prompt('Enter new password (leave blank to keep current):');
-        const role = prompt('Enter role (admin or viewer, leave blank to keep current):');
+    openEditUserModal(userId) {
+        console.log('openEditUserModal called with ID:', userId, 'Type:', typeof userId);
+        console.log('Current users list:', this.users);
 
-        const updates = {};
-        if (username) updates.username = username;
-        if (password) updates.password = password;
-        if (role) updates.role = role;
+        const user = this.users.find(u => u.id === userId);
+        if (!user) {
+            console.error('User not found in this.users cache!');
+            console.log('Available IDs:', this.users.map(u => u.id));
+            return;
+        }
+        console.log('User found:', user);
 
-        if (Object.keys(updates).length === 0) {
-            alert('No changes made');
+        const modal = document.getElementById('edit-user-modal');
+        console.log('Modal element:', modal);
+        if (!modal) {
+            console.error('CRITICAL: Modal element #edit-user-modal not found in DOM!');
+            alert('Error: Modal not found. Please refresh the page.');
             return;
         }
 
+        const isSSO = !!user.oidcId;
+        console.log('Is SSO user:', isSSO);
+
+        // Populate form with null checks
         try {
-            await API.users.update(userId, updates);
-            alert('User updated successfully!');
-            this.loadUsers();
+            const editId = document.getElementById('edit-user-id');
+            const editUsername = document.getElementById('edit-username');
+            const editEmail = document.getElementById('edit-email');
+            const editRole = document.getElementById('edit-role');
+            const editPassword = document.getElementById('edit-password');
+
+            console.log('Form elements found:', { editId, editUsername, editEmail, editRole, editPassword });
+
+            if (editId) editId.value = user.id;
+            if (editUsername) editUsername.value = user.username;
+            if (editEmail) editEmail.value = user.email || '';
+            if (editRole) editRole.value = user.role;
+            if (editPassword) editPassword.value = '';
+
+            // Handle SSO specific UI
+            const passwordHint = document.getElementById('edit-password-hint');
+            const oidcGroup = document.getElementById('oidc-info-group');
+            const oidcIdDisplay = document.getElementById('edit-oidc-id');
+
+            if (isSSO) {
+                if (editPassword) {
+                    editPassword.disabled = true;
+                    editPassword.placeholder = "Managed by SSO Provider";
+                }
+                if (passwordHint) passwordHint.textContent = "Password cannot be changed for SSO users.";
+                if (oidcGroup) oidcGroup.classList.remove('hidden');
+                if (oidcIdDisplay) oidcIdDisplay.textContent = user.oidcId;
+            } else {
+                if (editPassword) {
+                    editPassword.disabled = false;
+                    editPassword.placeholder = "Leave blank to keep current";
+                }
+                if (passwordHint) passwordHint.textContent = "Optional. Leave blank to keep unchanged.";
+                if (oidcGroup) oidcGroup.classList.add('hidden');
+            }
+
+            // Show modal
+            console.log('Adding active class to modal...');
+            modal.classList.add('active');
+            console.log('Modal classes after add:', modal.classList.toString());
+
+            // Setup Close/Cancel handlers (once)
+            this.setupModalHandlers(modal);
+            console.log('Modal should now be visible!');
         } catch (err) {
-            alert('Error updating user: ' + err.message);
+            console.error('Error populating modal:', err);
+            alert('Error opening edit modal: ' + err.message);
         }
     }
+
+    setupModalHandlers(modal) {
+        if (this.modalHandlersSetup) return;
+
+        const closeBtn = document.getElementById('edit-user-close');
+        const cancelBtn = document.getElementById('edit-user-cancel');
+        const saveBtn = document.getElementById('edit-user-save');
+
+        const closeModal = () => modal.classList.remove('active');
+
+        closeBtn.onclick = closeModal;
+        cancelBtn.onclick = closeModal;
+
+        // Click outside to close
+        modal.onclick = (e) => {
+            if (e.target === modal) closeModal();
+        };
+
+        // Save Handler
+        saveBtn.onclick = async () => {
+            const userId = document.getElementById('edit-user-id').value;
+            const updates = {
+                username: document.getElementById('edit-username').value,
+                role: document.getElementById('edit-role').value
+            };
+
+            const newPassword = document.getElementById('edit-password').value;
+            if (newPassword && !document.getElementById('edit-password').disabled) {
+                updates.password = newPassword;
+            }
+
+            try {
+                await API.users.update(userId, updates);
+                // alert('User updated successfully!'); // Optional: Replace with toast?
+                closeModal();
+                this.loadUsers();
+            } catch (err) {
+                alert('Error updating user: ' + err.message);
+            }
+        };
+
+        this.modalHandlersSetup = true;
+    }
+
 
     async deleteUser(userId, username) {
         if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
@@ -357,7 +470,6 @@ class SettingsPage {
 
         try {
             await API.users.delete(userId);
-            alert('User deleted successfully!');
             this.loadUsers();
         } catch (err) {
             alert('Error deleting user: ' + err.message);

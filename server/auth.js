@@ -111,6 +111,25 @@ function configureJwtStrategy(getUserById) {
 }
 
 /**
+ * Configure Passport session serialization
+ * Required for OIDC flow which uses sessions
+ */
+function configureSessionSerialization(getUserById) {
+    passport.serializeUser((user, done) => {
+        done(null, user.id);
+    });
+
+    passport.deserializeUser(async (id, done) => {
+        try {
+            const user = await getUserById(id);
+            done(null, user);
+        } catch (err) {
+            done(err, null);
+        }
+    });
+}
+
+/**
  * Configure Passport OpenID Connect Strategy
  */
 function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
@@ -173,8 +192,10 @@ function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
                 let user = await findUserByOidcId(sub);
 
                 // 2. If not found, try to match by email
-                if (!user && profile.emails && profile.emails.length > 0) {
-                    const email = profile.emails[0].value;
+                // Extract email - handle both profile.emails[] (Google) and profile.email (others)
+                const email = profile.emails?.[0]?.value || profile.email || profile._json?.email;
+
+                if (!user && email) {
                     user = await findUserByEmail(email);
 
                     // If found by email but no OIDC ID, link them
@@ -187,13 +208,13 @@ function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
 
                 // 3. If still not found, create new user (JIT Provisioning)
                 if (!user) {
-                    const username = profile.username || profile.displayName || (profile.emails ? profile.emails[0].value.split('@')[0] : `user_${sub.substring(0, 8)}`);
+                    const username = profile.username || profile.displayName || (email ? email.split('@')[0] : `user_${sub.substring(0, 8)}`);
 
                     user = await createUser({
                         username: username,
                         role: 'viewer', // Default role for SSO users
                         oidcId: sub,
-                        email: profile.emails ? profile.emails[0].value : null
+                        email: email || null
                     });
                 }
 
@@ -239,6 +260,7 @@ module.exports = {
     verifyToken,
     configureLocalStrategy,
     configureJwtStrategy,
+    configureSessionSerialization,
     configureOidcStrategy,
     requireAuth,
     requireAdmin,
