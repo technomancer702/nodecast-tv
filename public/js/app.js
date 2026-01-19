@@ -16,6 +16,7 @@ class App {
 
         // Initialize page controllers
         this.pages.home = new HomePage(this);
+        this.pages.live = new LivePage(this);
         this.pages.guide = new GuidePage(this);
         this.pages.movies = new MoviesPage(this);
         this.pages.series = new SeriesPage(this);
@@ -113,6 +114,15 @@ class App {
             });
         });
 
+        // Now Playing indicator
+        const nowPlayingBtn = document.getElementById('now-playing-indicator');
+        if (nowPlayingBtn) {
+            nowPlayingBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.navigateTo('watch');
+            });
+        }
+
         // Toggle groups button
         document.getElementById('toggle-groups').addEventListener('click', () => {
             this.channelList.toggleAllGroups();
@@ -137,9 +147,19 @@ class App {
             this.navigateTo(page, false); // false = don't add to history
         });
 
-        // Initialize home page
+        // Initialize home page first (it's needed for channel list)
         await this.pages.home.init();
-        this.navigateTo('home', true); // true = replace history (don't add)
+
+        // Preload EPG data in background (non-blocking)
+        // This ensures EPG info is available on Live TV page without visiting Guide first
+        this.epgGuide.loadEpg().catch(err => {
+            console.warn('Background EPG load failed:', err.message);
+        });
+
+        // Navigate to the page from URL hash, or default to home
+        const hash = window.location.hash.slice(1); // Remove #
+        const initialPage = hash && this.pages[hash] ? hash : 'home';
+        this.navigateTo(initialPage, true); // true = replace history (don't add)
 
         console.log('NodeCast TV initialized');
     }

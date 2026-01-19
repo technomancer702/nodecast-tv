@@ -28,11 +28,11 @@ const BROWSER_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'vorbis'];
 /**
  * Probe stream with ffprobe
  */
-function probeStream(url, ffprobePath, timeout = 15000) {
+function probeStream(url, ffprobePath, userAgent = null, timeout = 15000) {
     return new Promise((resolve, reject) => {
         const args = [
             '-v', 'error',
-            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            '-user_agent', userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             '-print_format', 'json',
             '-show_streams',
             '-show_format',
@@ -112,11 +112,15 @@ function analyzeProbeResult(probeResult, url) {
         }));
 
     // Determine what processing is needed
-    // 1. Incompatible audio -> Transcode (highest priority)
-    const needsTranscode = !audioOk;
+    // 4. MKV files often cause OOM/decoding issues in browser fMP4 remux, 
+    // so we force them to "needsTranscode" which uses HLS (more robust).
+    // The frontend will still use "copy" mode if codecs are compatible.
+    const isMkv = container.includes('matroska') || container.includes('webm') || url.endsWith('.mkv');
 
-    // 2. Compatible audio/video but incompatible container -> Remux
-    // This catches raw TS, MKV, AVI, etc. that have H.264/AAC but wrong container
+    // 1. Incompatible audio/video OR MKV -> Transcode (or HLS Copy)
+    const needsTranscode = !audioOk || !videoOk || isMkv;
+
+    // 2. Compatible audio/video but incompatible container (non-MKV) -> Remux (fMP4 pipe)
     const needsRemux = !needsTranscode && (!containerOk || isRawTs);
 
     const compatible = !needsTranscode && !needsRemux;
@@ -124,6 +128,9 @@ function analyzeProbeResult(probeResult, url) {
     return {
         video: videoCodec,
         audio: audioCodec,
+        width: videoStream?.width || 0,
+        height: videoStream?.height || 0,
+        audioChannels: audioStream?.channels || 0, // For Smart Audio Copy
         container: container,
         compatible: compatible,
         needsRemux: needsRemux,
@@ -133,12 +140,13 @@ function analyzeProbeResult(probeResult, url) {
 }
 
 router.get('/', async (req, res) => {
-    const { url } = req.query;
+    const { url, ua } = req.query;
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
     }
 
     const ffprobePath = req.app.locals.ffprobePath;
+    const cacheKey = `${url}${ua ? `|${ua}` : ''}`;
 
     if (!ffprobePath) {
         // No ffprobe available - assume needs transcoding to be safe
@@ -154,20 +162,20 @@ router.get('/', async (req, res) => {
     }
 
     // Check cache
-    const cached = probeCache.get(url);
+    const cached = probeCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
         console.log(`[Probe] Cache hit for: ${url.substring(0, 50)}...`);
         return res.json(cached.result);
     }
 
-    console.log(`[Probe] Probing: ${url.substring(0, 80)}...`);
+    console.log(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
 
     try {
-        const probeResult = await probeStream(url, ffprobePath);
+        const probeResult = await probeStream(url, ffprobePath, ua);
         const analysis = analyzeProbeResult(probeResult, url);
 
         // Cache result
-        probeCache.set(url, { result: analysis, timestamp: Date.now() });
+        probeCache.set(cacheKey, { result: analysis, timestamp: Date.now() });
 
         console.log(`[Probe] Result: video=${analysis.video}, audio=${analysis.audio}, ` +
             `container=${analysis.container}, compatible=${analysis.compatible}, ` +

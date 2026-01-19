@@ -71,5 +71,41 @@ router.get('/sync-status', (req, res) => {
     });
 });
 
+/**
+ * Get hardware capabilities (GPU acceleration support)
+ * GET /api/settings/hw-info
+ */
+router.get('/hw-info', async (req, res) => {
+    try {
+        const hwDetect = require('../services/hwDetect');
+        let capabilities = hwDetect.getCapabilities();
+
+        // If not yet detected, run detection now
+        if (!capabilities) {
+            capabilities = await hwDetect.detect();
+        }
+
+        res.json(capabilities);
+    } catch (err) {
+        console.error('Error getting hardware info:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * Refresh hardware detection (re-probe GPUs)
+ * POST /api/settings/hw-info/refresh
+ */
+router.post('/hw-info/refresh', async (req, res) => {
+    try {
+        const hwDetect = require('../services/hwDetect');
+        const capabilities = await hwDetect.refresh();
+        res.json(capabilities);
+    } catch (err) {
+        console.error('Error refreshing hardware info:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
 

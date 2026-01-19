@@ -497,6 +497,7 @@ class ChannelList {
 
                 const isFavorite = this.isFavorite(channel.sourceId, channel.id);
                 const renderId = this.renderedChannels[renderIndex]?._renderId || '';
+                const renderGroup = this.renderedChannels[renderIndex]?._renderGroup || groupName;
                 renderIndex++;
 
                 html += `
@@ -506,7 +507,8 @@ class ChannelList {
                data-source-type="${channel.sourceType}"
                data-stream-id="${channel.streamId || ''}"
                data-url="${channel.url || ''}"
-               data-render-id="${renderId}">
+               data-render-id="${renderId}"
+               data-render-group="${renderGroup}">
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
@@ -604,13 +606,22 @@ class ChannelList {
             const isActive = this.currentChannel?.id === channel.id;
             const isFavorite = this.isFavorite(channel.sourceId, channel.id);
 
+            // Find the matching rendered channel to get its unique IDs
+            const renderedChannel = this.renderedChannels.find(rc =>
+                rc.id === channel.id && rc.sourceId === channel.sourceId && rc._renderGroup === groupName
+            );
+            const renderId = renderedChannel?._renderId || '';
+            const renderGroup = renderedChannel?._renderGroup || groupName;
+
             html += `
           <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''}" 
                data-channel-id="${channel.id}"
                data-source-id="${channel.sourceId}"
                data-source-type="${channel.sourceType}"
                data-stream-id="${channel.streamId || ''}"
-               data-url="${channel.url || ''}">
+               data-url="${channel.url || ''}"
+               data-render-id="${renderId}"
+               data-render-group="${renderGroup}">
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
@@ -1079,6 +1090,7 @@ class ChannelList {
 
         this.currentChannel = channel;
         this.currentRenderId = dataset.renderId; // Track which visual instance is active
+        this.currentRenderGroup = dataset.renderGroup; // Track which group the selection came from
 
         // Update active state in DOM
         this.container.querySelectorAll('.channel-item.active').forEach(el => {
@@ -1359,11 +1371,20 @@ class ChannelList {
             currentIndex = this.renderedChannels.findIndex(c => c._renderId === this.currentRenderId);
         }
 
-        // Fallback: Find first matching channel ID (if render ID lost or invalid)
+        // Fallback: Find matching channel ID, prioritizing same render group
         if (currentIndex === -1) {
-            currentIndex = this.renderedChannels.findIndex(c =>
-                c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
-            );
+            // First try to find in same group (for Favorites containing duplicates)
+            if (this.currentRenderGroup) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId && c._renderGroup === this.currentRenderGroup
+                );
+            }
+            // Final fallback: any matching channel
+            if (currentIndex === -1) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
+                );
+            }
         }
 
         if (currentIndex === -1) return;
@@ -1393,10 +1414,20 @@ class ChannelList {
             currentIndex = this.renderedChannels.findIndex(c => c._renderId === this.currentRenderId);
         }
 
+        // Fallback: Find matching channel ID, prioritizing same render group
         if (currentIndex === -1) {
-            currentIndex = this.renderedChannels.findIndex(c =>
-                c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
-            );
+            // First try to find in same group (for Favorites containing duplicates)
+            if (this.currentRenderGroup) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId && c._renderGroup === this.currentRenderGroup
+                );
+            }
+            // Final fallback: any matching channel
+            if (currentIndex === -1) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
+                );
+            }
         }
 
         if (currentIndex === -1) return;

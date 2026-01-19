@@ -195,10 +195,53 @@
 
                 <button type="submit" class="btn-login" id="submit-btn">Sign In</button>
             </form>
+
+            <div class="sso-divider" style="text-align: center; margin: 20px 0; position: relative;">
+                <span
+                    style="background: var(--color-bg-secondary); padding: 0 10px; color: var(--color-text-secondary); font-size: 14px; position: relative; z-index: 1;">OR</span>
+                <div
+                    style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--color-border); z-index: 0;">
+                </div>
+            </div>
+
+            <button id="btn-sso-login" class="btn-login"
+                style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text-primary); display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.2s;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    style="width: 20px; height: 20px;">
+                    <path
+                        d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                </svg>
+                Sign in with SSO
+            </button>
+
+            <style>
+                #btn-sso-login:hover {
+                    background: var(--color-bg-tertiary) !important;
+                    border-color: var(--color-accent) !important;
+                    color: var(--color-accent) !important;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                }
+            </style>
         </div>
     </div>
 
     <script>
+        // Start SSO Login
+        document.getElementById('btn-sso-login').addEventListener('click', () => {
+            window.location.href = '/api/auth/oidc/login';
+        });
+
+        // Check for URL Error params
+        const urlParams = new URLSearchParams(window.location.search);
+        const error = urlParams.get('error');
+        if (error) {
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.textContent = error;
+            errorMessage.classList.add('show');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
         // Check if setup is required
         let isSetupMode = false;
 
@@ -213,6 +256,9 @@
                     document.getElementById('submit-btn').textContent = 'Create Account';
                     document.getElementById('setup-message').classList.add('show');
                     document.getElementById('password').placeholder = 'Minimum 6 characters';
+                    // Hide SSO in setup mode
+                    document.querySelector('.sso-divider').style.display = 'none';
+                    document.getElementById('btn-sso-login').style.display = 'none';
                 }
             } catch (err) {
                 console.error('Error checking setup status:', err);

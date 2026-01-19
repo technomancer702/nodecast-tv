@@ -288,5 +288,42 @@ router.post('/hide/all', async (req, res) => {
     }
 });
 
+// Get recent movies or series
+router.get('/recent', async (req, res) => {
+    try {
+        const { type, limit = 12 } = req.query;
+        if (!type || (type !== 'movie' && type !== 'series')) {
+            return res.status(400).json({ error: 'Valid type (movie or series) is required' });
+        }
+
+        const db = getDb();
+        const recentItems = db.prepare(`
+            SELECT * FROM playlist_items p
+            WHERE p.type = ? 
+              AND p.is_hidden = 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM categories c 
+                  WHERE c.source_id = p.source_id 
+                    AND c.category_id = p.category_id 
+                    AND c.type = p.type 
+                    AND c.is_hidden = 1
+              )
+            ORDER BY p.added_at DESC
+            LIMIT ?
+        `).all(type, parseInt(limit));
+
+        // Parse JSON data for each item
+        const formatted = recentItems.map(item => ({
+            ...item,
+            data: JSON.parse(item.data)
+        }));
+
+        res.json(formatted);
+    } catch (err) {
+        console.error(`Error getting recent ${req.query.type}:`, err);
+        res.status(500).json({ error: 'Failed to get recent items' });
+    }
+});
+
 module.exports = router;
 

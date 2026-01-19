@@ -429,17 +429,20 @@ class EpgGuide {
         // Calculate total height for virtual scrolling
         const totalHeight = this.filteredChannels.length * this.rowHeight;
 
-        // Build HTML structure with virtual scroll container
+        // Build HTML structure - header is INSIDE scroll container for natural sync
         this.container.innerHTML = `
       <div class="epg-container" style="position: relative;">
-        <div class="epg-time-header">
-          ${timeSlots.map(slot => `
-            <div class="epg-time-slot" style="width: ${30 * this.pixelsPerMinute}px;">
-              ${slot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        <div class="epg-scroll-container" style="overflow: auto; max-height: calc(100vh - 200px);">
+          <div class="epg-time-header">
+            <div class="epg-header-corner"></div>
+            <div class="epg-time-slots">
+              ${timeSlots.map(slot => `
+                <div class="epg-time-slot" style="width: ${30 * this.pixelsPerMinute}px;">
+                  ${slot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              `).join('')}
             </div>
-          `).join('')}
-        </div>
-        <div class="epg-scroll-container" style="overflow-y: auto; max-height: calc(100vh - 200px);">
+          </div>
           <div class="epg-spacer" style="height: ${totalHeight}px; position: relative;">
             <div class="epg-channel-rows" style="position: absolute; top: 0; left: 0; right: 0;"></div>
           </div>
@@ -461,16 +464,46 @@ class EpgGuide {
         if (this._scrollHandler) {
             this.scrollContainer?.removeEventListener('scroll', this._scrollHandler);
         }
+        if (this._hScrollHandler) {
+            this.scrollContainer?.removeEventListener('scroll', this._hScrollHandler);
+        }
 
-        // Set up scroll handler for virtual scrolling
+        // Get reference to time slots container for horizontal scroll sync
+        this.timeSlotsContainer = this.container.querySelector('.epg-time-slots');
+
+        // Set up scroll handler for virtual scrolling (debounced for performance)
         this._scrollHandler = this.debounce(() => this.updateVisibleRows(), 16); // ~60fps
         this.scrollContainer.addEventListener('scroll', this._scrollHandler);
+
+        // No need for horizontal scroll sync anymore - header is inside scroll container
 
         // Initial render of visible rows
         this.updateVisibleRows();
 
-        // Add now indicator
+        // Sync header corner width with actual sidebar width (handles CSS overrides)
+        this.syncHeaderCornerWidth();
+
+        // Add now indicator and set up periodic refresh
         this.updateNowIndicator();
+        // Clear any existing interval
+        if (this._nowIndicatorInterval) {
+            clearInterval(this._nowIndicatorInterval);
+        }
+        // Update indicator every 60 seconds
+        this._nowIndicatorInterval = setInterval(() => this.updateNowIndicator(), 60000);
+    }
+
+    /**
+     * Sync header corner width with actual sidebar width
+     * This handles cases where CSS variables are overridden on mobile
+     */
+    syncHeaderCornerWidth() {
+        const sidebar = this.container.querySelector('.epg-channel-info');
+        const headerCorner = this.container.querySelector('.epg-header-corner');
+        if (sidebar && headerCorner) {
+            const actualWidth = sidebar.offsetWidth;
+            headerCorner.style.width = `${actualWidth}px`;
+        }
     }
 
     /**
@@ -824,29 +857,29 @@ class EpgGuide {
 
     updateNowIndicator() {
         const now = new Date();
-        const container = this.container.querySelector('.epg-container');
-        if (!container) return;
+        // Place indicator inside the spacer so it scrolls with content
+        const spacer = this.container.querySelector('.epg-spacer');
+        if (!spacer) return;
 
         // Remove existing indicator
-        const existing = container.querySelector('.epg-now-line');
+        const existing = spacer.querySelector('.epg-now-line');
         if (existing) existing.remove();
 
-        // Calculate position
-        const startTime = new Date();
-        startTime.setHours(startTime.getHours() + this.timeOffset);
-        startTime.setMinutes(0, 0, 0);
+        // Calculate position relative to EPG start time
+        const minutesFromStart = (now - this.startTime) / 60000;
+        if (minutesFromStart < 0 || minutesFromStart > 1440) return; // Not in visible 24h range
 
-        const minutesFromStart = (now - startTime) / 60000;
-        if (minutesFromStart < 0 || minutesFromStart > 240) return; // Not in visible range
+        // Get sidebar width to offset the indicator
+        const sidebar = this.container.querySelector('.epg-channel-info');
+        const sidebarWidth = sidebar ? sidebar.offsetWidth : 150;
 
-        // Get current sidebar width
-        const sidebarWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--epg-sidebar-width')) || 150;
+        // Position is sidebar + time offset
         const leftPos = sidebarWidth + (minutesFromStart * this.pixelsPerMinute);
 
         const indicator = document.createElement('div');
         indicator.className = 'epg-now-line';
         indicator.style.left = `${leftPos}px`;
-        container.appendChild(indicator);
+        spacer.appendChild(indicator);
     }
 
     /**

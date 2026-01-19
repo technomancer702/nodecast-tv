@@ -522,6 +522,17 @@ class VideoPlayer {
         // Setup custom video controls
         this.initCustomControls();
 
+        // Detect video resolution when metadata loads (works for all streams)
+        this.video.addEventListener('loadedmetadata', () => {
+            if (this.video.videoHeight > 0) {
+                this.currentStreamInfo = {
+                    width: this.video.videoWidth,
+                    height: this.video.videoHeight
+                };
+                this.updateQualityBadge();
+            }
+        });
+
         // Initialize HLS.js if supported
         if (Hls.isSupported()) {
             this.hls = new Hls(this.getHlsConfig());
@@ -708,14 +719,56 @@ class VideoPlayer {
     }
 
     /**
+     * Start a HLS transcode session
+     */
+    async startTranscodeSession(url, options = {}) {
+        try {
+            console.log('[Player] Starting HLS transcode session...', options);
+            const res = await fetch('/api/transcode/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, ...options })
+            });
+            if (!res.ok) throw new Error('Failed to start session');
+            const session = await res.json();
+            this.currentSessionId = session.sessionId;
+            return session.playlistUrl;
+        } catch (err) {
+            console.error('[Player] Session start failed:', err);
+            // Fallback to direct transcode if session fails
+            return `/api/transcode?url=${encodeURIComponent(url)}`;
+        }
+    }
+
+    /**
+     * Stop and cleanup current transcode session
+     */
+    async stopTranscodeSession() {
+        if (this.currentSessionId) {
+            console.log('[Player] Stopping transcode session:', this.currentSessionId);
+            try {
+                // Fire and forget cleanup
+                fetch(`/api/transcode/${this.currentSessionId}`, { method: 'DELETE' });
+            } catch (err) {
+                console.error('Failed to stop session:', err);
+            }
+            this.currentSessionId = null;
+        }
+    }
+
+    /**
      * Play a channel
      */
     async play(channel, streamUrl) {
         this.currentChannel = channel;
 
         try {
+            // Stop any WatchPage playback (movies/series) before starting Live TV
+            window.app?.pages?.watch?.stop?.();
+
             // Stop current playback
             this.stop();
+            this.updateTranscodeStatus('hidden');
 
             // Hide "select a channel" overlay
             this.overlay.classList.add('hidden');
@@ -733,7 +786,11 @@ class VideoPlayer {
                 try {
                     const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}`);
                     const info = await probeRes.json();
-                    console.log(`[Player] Probe result: video=${info.video}, audio=${info.audio}, compatible=${info.compatible}`);
+                    console.log(`[Player] Probe result: video=${info.video}, audio=${info.audio}, ${info.width}x${info.height}, compatible=${info.compatible}`);
+
+                    // Store probe result for quality badge display
+                    this.currentStreamInfo = info;
+                    this.updateQualityBadge();
 
                     // Handle subtitles from probe result
                     // Clear existing remote tracks (from previous streams)
@@ -758,14 +815,25 @@ class VideoPlayer {
                     }
 
                     if (info.needsTranscode) {
-                        // Incompatible audio (AC3/EAC3/DTS) - use transcode
-                        console.log('[Player] Auto: Using transcode (incompatible audio)');
-                        const transcodeUrl = `/api/transcode?url=${encodeURIComponent(streamUrl)}`;
-                        this.currentUrl = transcodeUrl;
-                        this.video.src = transcodeUrl;
-                        this.video.play().catch(e => {
-                            if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+                        // Incompatible audio (AC3/EAC3/DTS) - use transcode session
+                        console.log('[Player] Auto: Using HLS transcode session');
+
+                        // Heuristic: If video is h264, it's likely compatible, so only copy video (audio transcode only)
+                        // If video is hevc/other, we need full transcode
+                        const videoMode = (info.video && info.video.includes('h264')) ? 'copy' : 'encode';
+                        const statusText = videoMode === 'copy' ? 'Transcoding (Audio)' : 'Transcoding (Video)';
+
+                        this.updateTranscodeStatus('transcoding', statusText);
+                        const playlistUrl = await this.startTranscodeSession(streamUrl, {
+                            videoMode,
+                            videoCodec: info.video,
+                            audioCodec: info.audio,
+                            audioChannels: info.audioChannels
                         });
+                        this.currentUrl = playlistUrl; // Update currentUrl for HLS reload
+
+                        this.playHls(playlistUrl);
+
                         this.updateNowPlaying(channel);
                         this.showNowPlayingOverlay();
                         this.fetchEpgData(channel);
@@ -774,6 +842,7 @@ class VideoPlayer {
                     } else if (info.needsRemux) {
                         // Raw .ts container - use remux
                         console.log('[Player] Auto: Using remux (.ts container)');
+                        this.updateTranscodeStatus('remuxing', 'Remux (Auto)');
                         const remuxUrl = `/api/remux?url=${encodeURIComponent(streamUrl)}`;
                         this.currentUrl = remuxUrl;
                         this.video.src = remuxUrl;
@@ -794,25 +863,73 @@ class VideoPlayer {
                 }
             }
 
-            // CHECK: Force Transcode Priority - transcoded streams bypass HLS.js
-            if (this.settings.forceTranscode) {
-                console.log('[Player] Force Transcode enabled. Routing through ffmpeg...');
-                const transcodeUrl = `/api/transcode?url=${encodeURIComponent(streamUrl)}`;
-                this.currentUrl = transcodeUrl;
+            // CHECK: Force Video Transcode (Full)
+            if (this.settings.forceVideoTranscode) {
+                console.log('[Player] Force Video Transcode enabled. Starting session (encode)...');
+                this.updateTranscodeStatus('transcoding', 'Transcoding (Video)');
+                const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode: 'encode' });
+                this.currentUrl = playlistUrl;
 
-                // Transcoded streams are fragmented MP4 - play directly with <video> element
-                console.log('[Player] Playing transcoded stream directly:', transcodeUrl);
-                this.video.src = transcodeUrl;
-                this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
-                });
+                // Load HLS
+                this.updateNowPlaying(channel, 'Transcoding (Video)');
+                // ... (rest is same logic flow, simplified by just falling through to playHls call if I refactored)
+                // But for minimize drift, I'll copy the block logic for HLS playback init
+                // Actually, I can just fall through if I set looksLikeHls = true?
+                // No, play logic is sequential.
+                if (Hls.isSupported()) {
+                    // Start HLS
+                    // ... this repeats code. I should probably just set currentUrl and let HLS block handle?
+                    // But HLS block is lower down.
+                    // I will just execute the HLS init here as before.
+
+                    // Actually, easiest way is to re-assign streamUrl and goto start? No.
+                    // Copy existing forceTranscode block logic
+                    if (this.hls) {
+                        this.hls.destroy();
+                    }
+                    this.hls = new Hls();
+                    this.hls.loadSource(playlistUrl);
+                    this.hls.attachMedia(this.video);
+                    this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        this.video.play().catch(console.error);
+                    });
+                    // Handle errors
+                    this.hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            console.log('[Player] HLS fatal error');
+                            this.hls.destroy();
+                        }
+                    });
+
+                    return; // Exit
+                }
+            }
+
+            // CHECK: Force Audio Transcode (Copy Video) - legacy forceTranscode setting
+            if (this.settings.forceTranscode) {
+                console.log('[Player] Force Audio Transcode enabled. Starting session (copy)...');
+                this.updateTranscodeStatus('transcoding', 'Transcoding (Audio)');
+
+                // Probe to get video codec for HEVC tag handling
+                let videoCodec = 'unknown';
+                try {
+                    const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}`);
+                    const info = await probeRes.json();
+                    videoCodec = info.video;
+                } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
+
+                const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode: 'copy', videoCodec });
+                this.currentUrl = playlistUrl;
+
+                console.log('[Player] Playing transcoded HLS stream:', playlistUrl);
+                this.playHls(playlistUrl);
 
                 // Update UI and dispatch events
                 this.updateNowPlaying(channel);
                 this.showNowPlayingOverlay();
                 this.fetchEpgData(channel);
                 window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
-                return; // Exit early - don't use HLS.js path
+                return; // Exit early
             }
 
             // Proactively use proxy for:
@@ -842,6 +959,7 @@ class VideoPlayer {
             if (this.settings.forceRemux && (isRawTs || isExtensionless)) {
                 console.log('[Player] Force Remux enabled. Routing through FFmpeg remux...');
                 console.log('[Player] Stream type:', isRawTs ? 'Raw TS' : 'Extension-less (assumed TS)');
+                this.updateTranscodeStatus('remuxing', 'Remux (Force)');
                 const remuxUrl = this.getRemuxUrl(streamUrl);
                 this.video.src = remuxUrl;
                 this.video.play().catch(e => {
@@ -870,6 +988,13 @@ class VideoPlayer {
 
             // Priority 1: Use HLS.js for HLS streams on browsers that support it
             if (looksLikeHls && Hls.isSupported()) {
+                this.updateTranscodeStatus('direct', 'Direct HLS');
+
+                // Use playHls helper logic here (or extract it)
+                // For now, let's just use existing logic but wrapped/modularized if possible?
+                // The HLS init logic is quite complex with error handling
+                // I'll inline the Hls init here as per original but mindful of proxy vs local
+
                 this.hls = new Hls(this.getHlsConfig());
                 this.hls.loadSource(finalUrl);
                 this.hls.attachMedia(this.video);
@@ -883,11 +1008,13 @@ class VideoPlayer {
                 // Re-attach error handler for the new Hls instance
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
-                        // CORS issues can manifest as NETWORK_ERROR or MEDIA_ERROR with fragParsingError
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
 
-                        if (isCorsLikely && !this.isUsingProxy) {
+                        // Don't proxy if it's already a local API URL
+                        const isLocalApi = this.currentUrl.startsWith('/api/');
+
+                        if (isCorsLikely && !this.isUsingProxy && !isLocalApi) {
                             console.log('CORS/Network error detected, retrying via proxy...', data.details);
                             this.isUsingProxy = true;
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl));
@@ -925,6 +1052,7 @@ class VideoPlayer {
             } else if (this.video.canPlayType('application/vnd.apple.mpegurl') === 'probably' ||
                 this.video.canPlayType('application/vnd.apple.mpegurl') === 'maybe') {
                 // Priority 2: Native HLS support (Safari on iOS/macOS where HLS.js may not work)
+                this.updateTranscodeStatus('direct', 'Direct Native');
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name === 'AbortError') return; // Ignore interruption by new load
@@ -939,6 +1067,7 @@ class VideoPlayer {
                 });
             } else {
                 // Priority 3: Try direct playback for non-HLS streams
+                this.updateTranscodeStatus('direct', 'Direct Play');
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
@@ -964,9 +1093,86 @@ class VideoPlayer {
     }
 
     /**
+     * Helper to play HLS stream (reduces duplication)
+     */
+    playHls(url) {
+        if (this.hls) {
+            this.hls.destroy();
+        }
+
+        this.hls = new Hls(this.getHlsConfig());
+        this.hls.loadSource(url);
+        this.hls.attachMedia(this.video);
+
+        this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            this.video.play().catch(e => {
+                if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
+            });
+        });
+
+        this.hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                // Simple error handling for forced HLS/transcode modes
+                console.error('Fatal HLS error in transcode mode:', data);
+                this.hls.destroy();
+            }
+        });
+    }
+
+    async updateTranscodeStatus(mode, text) {
+        const el = document.getElementById('player-transcode-status');
+        if (!el) return;
+
+        el.className = 'transcode-status'; // Reset classes
+
+        if (mode === 'hidden') {
+            el.classList.add('hidden');
+            return;
+        }
+
+        el.textContent = text || mode;
+        el.classList.add(mode);
+
+        // Ensure it's visible
+        el.classList.remove('hidden');
+    }
+
+    /**
+     * Get quality label from video height
+     */
+    getQualityLabel(height) {
+        if (height >= 2160) return '4K';
+        if (height >= 1440) return '1440p';
+        if (height >= 1080) return '1080p';
+        if (height >= 720) return '720p';
+        if (height >= 480) return '480p';
+        if (height > 0) return `${height}p`;
+        return null;
+    }
+
+    /**
+     * Update quality badge display
+     */
+    updateQualityBadge() {
+        const badge = document.getElementById('player-quality-badge');
+        if (!badge) return;
+
+        if (this.currentStreamInfo?.height > 0) {
+            badge.textContent = this.getQualityLabel(this.currentStreamInfo.height);
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+
+    /**
      * Fetch EPG data for current channel
      */
     async fetchEpgData(channel) {
+        if (!channel || (!channel.tvgId && !channel.epg_id)) {
+            this.updateNowPlaying(channel, null);
+            return;
+        }
         try {
             // First, try to use the centralized EpgGuide data (already loaded)
             if (window.app && window.app.epgGuide && window.app.epgGuide.programmes) {
@@ -1088,6 +1294,9 @@ class VideoPlayer {
      * Stop playback
      */
     stop() {
+        // Stop any running transcode session first
+        this.stopTranscodeSession();
+
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;
@@ -1101,6 +1310,11 @@ class VideoPlayer {
         this.controlsOverlay?.classList.add('hidden'); // Hide controls
         this.loadingSpinner?.classList.remove('show');
         this.nowPlaying.classList.add('hidden');
+
+        // Hide quality badge
+        this.currentStreamInfo = null;
+        const badge = document.getElementById('player-quality-badge');
+        if (badge) badge.classList.add('hidden');
     }
 
     /**

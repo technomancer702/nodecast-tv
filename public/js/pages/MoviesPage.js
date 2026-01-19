@@ -352,7 +352,8 @@ class MoviesPage {
                         year: movie.year || movie.releaseDate?.substring(0, 4),
                         rating: movie.rating,
                         sourceId: movie.sourceId,
-                        categoryId: movie.category_id
+                        categoryId: movie.category_id,
+                        containerExtension: container
                     }, result.url);
                 }
             }

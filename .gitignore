@@ -8,4 +8,5 @@ coverage/
 .DS_Store
 dist/
 release/
+
 transcode-cache/

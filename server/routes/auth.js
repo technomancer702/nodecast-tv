@@ -13,6 +13,39 @@ auth.configureJwtStrategy(
     async (id) => await db.users.getById(id)
 );
 
+// Configure Passport session serialization (required for OIDC)
+auth.configureSessionSerialization(
+    async (id) => await db.users.getById(id)
+);
+
+// Configure OIDC Strategy
+auth.configureOidcStrategy(
+    async (oidcId) => await db.users.getByOidcId(oidcId),
+    async (email) => await db.users.getByEmail(email),
+    async (userData) => await db.users.create(userData)
+);
+
+/**
+ * Start OIDC Login
+ * GET /api/auth/oidc/login
+ */
+router.get('/oidc/login', auth.passport.authenticate('openidconnect'));
+
+/**
+ * OIDC Callback
+ * GET /api/auth/oidc/callback
+ */
+router.get('/oidc/callback',
+    auth.passport.authenticate('openidconnect', { session: false, failureRedirect: '/login.html?error=SSO+Failed' }),
+    (req, res) => {
+        // Successful authentication
+        const token = auth.generateToken(req.user);
+
+        // Redirect to hompage with token
+        res.redirect(`/?token=${token}`);
+    }
+);
+
 /**
  * Check if initial setup is required
  * GET /api/auth/setup-required
@@ -34,22 +67,22 @@ router.get('/setup-required', async (req, res) => {
 router.post('/setup', async (req, res) => {
     try {
         const userCount = await db.users.count();
-        
+
         // Check if setup already done
         if (userCount > 0) {
             return res.status(400).json({ error: 'Setup already completed' });
         }
-        
+
         const { username, password } = req.body;
-        
+
         if (!username || !password) {
             return res.status(400).json({ error: 'Username and password required' });
         }
-        
+
         if (password.length < 6) {
             return res.status(400).json({ error: 'Password must be at least 6 characters' });
         }
-        
+
         // Create admin user
         const passwordHash = await auth.hashPassword(password);
         const adminUser = await db.users.create({
@@ -57,10 +90,10 @@ router.post('/setup', async (req, res) => {
             passwordHash,
             role: 'admin'
         });
-        
+
         // Generate token for immediate login
         const token = auth.generateToken(adminUser);
-        
+
         res.status(201).json({
             message: 'Admin user created successfully',
             token,
@@ -82,14 +115,14 @@ router.post('/login', (req, res, next) => {
             console.error('Login error:', err);
             return res.status(500).json({ error: 'Server error' });
         }
-        
+
         if (!user) {
             return res.status(401).json({ error: info?.message || 'Invalid credentials' });
         }
-        
+
         // Generate JWT token
         const token = auth.generateToken(user);
-        
+
         res.json({
             token,
             user: {
@@ -118,11 +151,11 @@ router.post('/logout', (req, res) => {
 router.get('/me', auth.requireAuth, async (req, res) => {
     try {
         const user = await db.users.getById(req.user.id);
-        
+
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        
+
         res.json({
             id: user.id,
             username: user.username,
@@ -141,13 +174,13 @@ router.get('/me', auth.requireAuth, async (req, res) => {
 router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const allUsers = await db.users.getAll();
-        
+
         // Remove password hashes
         const users = allUsers.map(u => {
             const { passwordHash, ...userWithoutPassword } = u;
             return userWithoutPassword;
         });
-        
+
         res.json(users);
     } catch (err) {
         console.error('Error fetching users:', err);
@@ -162,26 +195,26 @@ router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
 router.post('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const { username, password, role } = req.body;
-        
+
         if (!username || !password || !role) {
             return res.status(400).json({ error: 'Username, password, and role are required' });
         }
-        
+
         if (password.length < 6) {
             return res.status(400).json({ error: 'Password must be at least 6 characters' });
         }
-        
+
         if (!['admin', 'viewer'].includes(role)) {
             return res.status(400).json({ error: 'Role must be either "admin" or "viewer"' });
         }
-        
+
         const passwordHash = await auth.hashPassword(password);
         const newUser = await db.users.create({
             username,
             passwordHash,
             role
         });
-        
+
         res.status(201).json(newUser);
     } catch (err) {
         console.error('Error creating user:', err);
@@ -197,25 +230,25 @@ router.put('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) =
     try {
         const { id } = req.params;
         const { username, password, role } = req.body;
-        
+
         const updates = {};
-        
+
         if (username) {
             updates.username = username;
         }
-        
+
         if (password) {
             if (password.length < 6) {
                 return res.status(400).json({ error: 'Password must be at least 6 characters' });
             }
             updates.passwordHash = await auth.hashPassword(password);
         }
-        
+
         if (role) {
             if (!['admin', 'viewer'].includes(role)) {
                 return res.status(400).json({ error: 'Role must be either "admin" or "viewer"' });
             }
-            
+
             // Prevent removing admin role from the last admin
             const user = await db.users.getById(id);
             if (user && user.role === 'admin' && role !== 'admin') {
@@ -225,10 +258,10 @@ router.put('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) =
                     return res.status(400).json({ error: 'Cannot remove admin role from the last admin user' });
                 }
             }
-            
+
             updates.role = role;
         }
-        
+
         const updatedUser = await db.users.update(id, updates);
         res.json(updatedUser);
     } catch (err) {
@@ -244,12 +277,12 @@ router.put('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) =
 router.delete('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         // Prevent deleting yourself
         if (parseInt(id) === req.user.id) {
             return res.status(400).json({ error: 'Cannot delete your own account' });
         }
-        
+
         await db.users.delete(id);
         res.json({ success: true, message: 'User deleted successfully' });
     } catch (err) {

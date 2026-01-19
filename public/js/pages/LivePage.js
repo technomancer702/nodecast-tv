@@ -2,7 +2,7 @@
  * Home Page Controller
  */
 
-class HomePage {
+class LivePage {
     constructor(app) {
         this.app = app;
         this.handleKeydown = this.handleKeydown.bind(this);
@@ -106,4 +106,4 @@ class HomePage {
     }
 }
 
-window.HomePage = HomePage;
+window.LivePage = LivePage;

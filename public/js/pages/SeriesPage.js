@@ -452,7 +452,8 @@ class SeriesPage {
                         seriesId: this.currentSeries?.series_id,
                         seriesInfo: this.currentSeriesInfo,
                         currentSeason: seasonNum,
-                        currentEpisode: episodeNum
+                        currentEpisode: episodeNum,
+                        containerExtension: container
                     }, result.url);
                 }
             }

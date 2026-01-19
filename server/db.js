@@ -63,12 +63,38 @@ function getDefaultSettings() {
     lastVolume: 80,
     autoPlayNextEpisode: false,
     forceProxy: false,
-    forceTranscode: false,
+    forceTranscode: false, // Force Audio Transcode
+    forceVideoTranscode: false, // Force Video Transcode
     forceRemux: false,
     autoTranscode: true,
     streamFormat: 'm3u8',
-    epgRefreshInterval: '24'
+    epgRefreshInterval: '24',
+    // User-Agent settings
+    userAgentPreset: 'chrome',    // chrome | vlc | tivimate | custom
+    userAgentCustom: '',          // Custom UA string when preset is 'custom'
+    // Transcoding settings
+    hwEncoder: 'auto',            // auto | nvenc | amf | qsv | vaapi | software
+    maxResolution: '1080p',       // 4k | 1080p | 720p | 480p
+    quality: 'medium',            // high | medium | low
+    audioMixPreset: 'auto',       // auto | itu | night | cinematic | passthrough
+    // Probe cache settings  
+    probeCacheTTL: 300,           // 5 minutes for URL probe cache
+    seriesProbeCacheDays: 7       // 7 days for series episode probe cache
   };
+}
+
+// User-Agent presets
+const USER_AGENT_PRESETS = {
+  chrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  vlc: 'VLC/3.0.20 LibVLC/3.0.20',
+  tivimate: 'TiviMate/4.7.0',
+};
+
+function getUserAgent(settings) {
+  if (settings.userAgentPreset === 'custom' && settings.userAgentCustom) {
+    return settings.userAgentCustom;
+  }
+  return USER_AGENT_PRESETS[settings.userAgentPreset] || USER_AGENT_PRESETS.chrome;
 }
 
 // Write lock to prevent concurrent writes from corrupting db.json
@@ -339,6 +365,16 @@ const users = {
     return db.users?.find(u => u.username === username);
   },
 
+  async getByOidcId(oidcId) {
+    const db = await loadDb();
+    return db.users?.find(u => u.oidcId === oidcId);
+  },
+
+  async getByEmail(email) {
+    const db = await loadDb();
+    return db.users?.find(u => u.email === email);
+  },
+
   async create(userData) {
     const db = await loadDb();
     if (!db.users) {
@@ -353,8 +389,11 @@ const users = {
     const newUser = {
       id: db.nextId++,
       username: userData.username,
-      passwordHash: userData.passwordHash,
+      // For OIDC users, passwordHash is optional
+      passwordHash: userData.passwordHash || null,
       role: userData.role || 'viewer',
+      oidcId: userData.oidcId || null,
+      email: userData.email || null,
       createdAt: new Date().toISOString()
     };
 
@@ -422,4 +461,4 @@ const users = {
   }
 };
 
-module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings };
+module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings, getUserAgent, USER_AGENT_PRESETS };

@@ -125,7 +125,7 @@ function parse(input) {
                         currentObject.description = textBuffer;
                         break;
                     case 'category':
-                        if (textBuffer) currentObject.category.push(textBuffer);
+                        if (textBuffer && currentObject.category) currentObject.category.push(textBuffer);
                         break;
                     case 'date':
                         currentObject.date = textBuffer;
@@ -374,7 +374,7 @@ async function* parseStreaming(input, batchSize = 1000) {
                     currentObject.description = textBuffer;
                     break;
                 case 'category':
-                    if (textBuffer) currentObject.category.push(textBuffer);
+                    if (textBuffer && currentObject.category) currentObject.category.push(textBuffer);
                     break;
                 case 'date':
                     currentObject.date = textBuffer;

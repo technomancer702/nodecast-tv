@@ -1,19 +1,23 @@
 const express = require('express');
 const router = express.Router();
-const { favorites } = require('../db');
+const { favorites } = require('../db/sqlite');
+const { requireAuth } = require('../auth');
 
-// Get all favorites
+// All favorites routes require authentication
+router.use(requireAuth);
+
+// Get all favorites for current user
 router.get('/', async (req, res) => {
     try {
         const { sourceId, itemType } = req.query;
-        const items = await favorites.getAll(sourceId, itemType);
+        const items = favorites.getAll(req.user.id, sourceId || null, itemType || null);
         res.json(items);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Add favorite
+// Add favorite for current user
 router.post('/', async (req, res) => {
     try {
         const { sourceId, itemId, itemType = 'channel' } = req.body;
@@ -21,14 +25,14 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Source ID and Item ID are required' });
         }
 
-        await favorites.add(sourceId, itemId, itemType);
+        favorites.add(req.user.id, sourceId, itemId, itemType);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Remove favorite
+// Remove favorite for current user
 router.delete('/', async (req, res) => {
     try {
         const { sourceId, itemId, itemType = 'channel' } = req.body;
@@ -36,14 +40,14 @@ router.delete('/', async (req, res) => {
             return res.status(400).json({ error: 'Source ID and Item ID are required' });
         }
 
-        await favorites.remove(sourceId, itemId, itemType);
+        favorites.remove(req.user.id, sourceId, itemId, itemType);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Check if item is favorited
+// Check if item is favorited by current user
 router.get('/check', async (req, res) => {
     try {
         const { sourceId, itemId, itemType = 'channel' } = req.query;
@@ -51,7 +55,7 @@ router.get('/check', async (req, res) => {
             return res.status(400).json({ error: 'Source ID and Item ID are required' });
         }
 
-        const isFav = await favorites.isFavorite(sourceId, itemId, itemType);
+        const isFav = favorites.isFavorite(req.user.id, sourceId, itemId, itemType);
         res.json({ isFavorite: isFav });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -59,3 +63,4 @@ router.get('/check', async (req, res) => {
 });
 
 module.exports = router;
+

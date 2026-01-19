@@ -980,7 +980,8 @@ video::cue {
 
 .epg-grid {
   height: calc(100vh - var(--navbar-height) - 60px);
-  overflow: auto;
+  overflow: hidden;
+  overflow-y: auto;
   padding: var(--space-md);
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -988,10 +989,22 @@ video::cue {
 
 .epg-time-header {
   display: flex;
+  position: sticky;
   top: 0;
   background: var(--color-bg-secondary);
   z-index: 10;
-  margin-left: var(--epg-sidebar-width);
+}
+
+.epg-header-corner {
+  width: var(--epg-sidebar-width);
+  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border);
+}
+
+.epg-time-slots {
+  display: flex;
+  flex: 1;
 }
 
 .epg-time-slot {
@@ -1103,7 +1116,7 @@ video::cue {
   bottom: 0;
   width: 2px;
   background: var(--color-error);
-  z-index: 15;
+  z-index: 2;
 }
 
 /* =====================================================
@@ -1853,6 +1866,21 @@ kbd {
   animation: spin 0.8s linear infinite;
 }
 
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-xl);
+  color: var(--color-text-muted);
+  width: 100%;
+}
+
+.horizontal-scroll .empty-state {
+  padding: var(--space-xl);
+  min-height: 150px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1887,6 +1915,7 @@ kbd {
     --sidebar-width: 320px;
     --space-lg: 16px;
     --space-xl: 24px;
+    --epg-sidebar-width: 180px;
   }
 
   /* Navigation - Hide text labels, show only icons */
@@ -1900,7 +1929,8 @@ kbd {
     gap: 0;
   }
 
-  .navbar-menu span:not(.nav-icon) {
+  /* Hide nav link text on mobile, but keep Now Playing visible */
+  .navbar-menu .nav-link span:not(.nav-icon) {
     display: none;
   }
 
@@ -2039,11 +2069,7 @@ kbd {
   }
 
   .epg-channel-info {
-    width: 180px;
-  }
-
-  .epg-time-slot {
-    min-width: 160px;
+    width: var(--epg-sidebar-width);
   }
 
   /* Movies & Series */
@@ -3314,6 +3340,24 @@ kbd {
   gap: var(--space-md);
   padding: var(--space-lg);
   padding-top: calc(var(--space-lg) + var(--safe-area-inset-top));
+  pointer-events: none;
+  z-index: 20;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.watch-top-bar>* {
+  pointer-events: auto;
+}
+
+/* Live TV Header: Left Title & Right Status */
+.watch-top-bar.live-header {
+  justify-content: space-between;
+}
+
+/* VOD Header: Spaced (Back Btn - Title - Status) */
+.watch-top-bar.vod-header {
+  justify-content: space-between;
 }
 
 .watch-back-btn {
@@ -4025,4 +4069,670 @@ kbd {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+}
+
+/* Hardware Info Grid (Transcoding Tab) */
+.hw-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-sm);
+}
+
+.hw-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.hw-info-item.hw-available {
+  border-color: var(--color-success);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.hw-info-item.hw-unavailable {
+  opacity: 0.6;
+}
+
+.hw-badge {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.hw-info-item.hw-available .hw-badge {
+  color: var(--color-success);
+}
+
+.hw-info-item.hw-unavailable .hw-badge {
+  color: var(--color-text-muted);
+}
+
+.hw-name {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Transcode Status Indicator */
+.transcode-status {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  backdrop-filter: blur(4px);
+  transition: opacity 0.3s ease;
+}
+
+.transcode-status.transcoding {
+  background: rgba(255, 68, 68, 0.8);
+  /* Red for Transcoding */
+  box-shadow: 0 0 10px rgba(255, 68, 68, 0.3);
+}
+
+.transcode-status.remuxing {
+  background: rgba(255, 153, 0, 0.8);
+  /* Orange for Remux */
+}
+
+.transcode-status.direct {
+  background: rgba(76, 175, 80, 0.8);
+  /* Green for Direct */
+}
+
+.transcode-status.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Badge Container for right alignment */
+.player-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  /* Fallback for cases without flex-grow middle element */
+}
+
+/* Quality Badge */
+.quality-badge {
+  display: inline-block;
+  background: rgba(158, 158, 158, 0.8);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.quality-badge.hidden {
+  display: none;
+}
+
+/* Watch Header Bar (Title + Transcode Status) */
+/* Moved to original definition around line 3311 */
+
+.watch-title-overlay {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+/* =====================================================
+   Edit User Modal
+   ===================================================== */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.active {
+  display: flex;
+}
+
+.modal-overlay .modal {
+  display: block;
+  position: relative;
+  inset: auto;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-overlay .modal-header {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-overlay .modal-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.modal-overlay .modal-close {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.modal-overlay .modal-close:hover {
+  color: var(--color-text-primary);
+}
+
+.modal-overlay .modal-body {
+  padding: var(--space-lg);
+}
+
+.modal-overlay .modal-footer {
+  padding: var(--space-md);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  background: var(--color-bg-tertiary);
+}
+
+/* Modal Form Styles */
+.modal-overlay .modal-form-group {
+  margin-bottom: var(--space-md);
+}
+
+.modal-overlay .modal-form-group label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.modal-overlay .modal-form-group .form-input {
+  width: 100%;
+  padding: var(--space-sm);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+}
+
+.modal-overlay .modal-form-group .form-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.modal-overlay .modal-form-group .form-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--color-bg-tertiary);
+}
+
+/* =====================================================
+   User Management Badges
+   ===================================================== */
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.user-badge-sso {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #fff;
+  box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3);
+}
+
+.user-badge-local {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.user-badge-admin {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  color: #000;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
+}
+
+.user-badge-viewer {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* =====================================================
+   Now Playing Indicator (Header)
+   ===================================================== */
+
+.now-playing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  margin-right: var(--space-md);
+  background: linear-gradient(135deg, var(--color-accent) 0%, #8b5cf6 100%);
+  border-radius: var(--radius-full);
+  color: white;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  animation: now-playing-pulse 2s ease-in-out infinite;
+}
+
+.now-playing-indicator:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5);
+}
+
+.now-playing-indicator.hidden {
+  display: none;
+}
+
+.now-playing-icon {
+  font-size: 10px;
+}
+
+.now-playing-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes now-playing-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* Mobile responsive - show in dropdown menu */
+@media (max-width: 768px) {
+  .now-playing-indicator {
+    width: calc(100% - 32px);
+    max-width: none;
+    margin: 0 16px var(--space-sm) 16px;
+    padding: 10px 16px;
+    font-size: 13px;
+    border-radius: var(--radius-md);
+    justify-content: center;
+  }
+}
+
+/* =====================================================
+   Home Dashboard Styles
+   ===================================================== */
+
+#page-home {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-content {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.dashboard-section {
+  margin-bottom: 40px;
+}
+
+.dashboard-section.hidden {
+  display: none;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.section-header h2 {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.5rem;
+  color: var(--color-text-bright);
+}
+
+/* Scroll Wrapper with Navigation Arrows */
+.scroll-wrapper {
+  position: relative;
+}
+
+.scroll-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  backdrop-filter: blur(8px);
+}
+
+.scroll-arrow:hover {
+  background: rgba(0, 0, 0, 0.9);
+  border-color: var(--color-accent);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.scroll-arrow svg {
+  width: 24px;
+  height: 24px;
+}
+
+.scroll-arrow.scroll-left {
+  left: -8px;
+}
+
+.scroll-arrow.scroll-right {
+  right: -8px;
+}
+
+.scroll-arrow.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Hide arrows on touch devices (they can swipe) */
+@media (hover: none) {
+  .scroll-arrow {
+    display: none;
+  }
+}
+
+.horizontal-scroll {
+
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbar by default, show on hover */
+.horizontal-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.horizontal-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.dashboard-card {
+  flex: 0 0 calc(50% - 10px);
+  /* 2 per view on small screens */
+  max-width: 240px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  scroll-snap-align: start;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* 4 per view on medium screens */
+@media (min-width: 768px) {
+  .dashboard-card {
+    flex: 0 0 calc(25% - 15px);
+  }
+}
+
+/* 6 per view on large screens */
+@media (min-width: 1200px) {
+  .dashboard-card {
+    flex: 0 0 calc(16.66% - 17px);
+  }
+}
+
+.dashboard-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--color-accent-dim);
+}
+
+.card-image {
+  position: relative;
+  aspect-ratio: 2/3;
+  overflow: hidden;
+}
+
+.card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+
+.dashboard-card:hover .card-image img {
+  transform: scale(1.05);
+}
+
+.progress-bar-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent);
+}
+
+.play-icon-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.play-icon-overlay svg {
+  width: 48px;
+  height: 48px;
+  color: white;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+}
+
+.dashboard-card:hover .play-icon-overlay {
+  opacity: 1;
+}
+
+.card-info {
+  padding: 12px;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.card-subtitle {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.loading-state,
+.empty-state {
+  padding: 40px;
+  text-align: center;
+  color: var(--color-text-muted);
+  width: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-lg);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* =====================================================
+   Channel Tile Styles (Favorite Channels)
+   ===================================================== */
+
+.channel-tiles {
+  gap: 16px;
+}
+
+.channel-tile {
+  flex: 0 0 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  padding: 12px 8px;
+  border-radius: var(--radius-md);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+  scroll-snap-align: start;
+}
+
+.channel-tile:hover {
+  transform: translateY(-4px);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tile-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.channel-tile:hover .tile-logo {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 16px rgba(var(--color-accent-rgb), 0.3);
+}
+
+.tile-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tile-name {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-align: center;
+  max-width: 90px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.channel-tile:hover .tile-name {
+  color: var(--color-text-bright);
+}
+
+/* Responsive: smaller tiles on mobile */
+@media (max-width: 480px) {
+  .channel-tile {
+    flex: 0 0 80px;
+    padding: 8px 4px;
+  }
+
+  .tile-logo {
+    width: 52px;
+    height: 52px;
+  }
+
+  .tile-name {
+    font-size: 0.7rem;
+    max-width: 70px;
+  }
 }

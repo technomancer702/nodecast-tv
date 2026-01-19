@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>NodeCast TV | IPTV Player</title>
+  <title>nodecast-tv | IPTV Player</title>
   <meta name="description" content="Stream live TV, movies, and series with EPG support">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="css/main.css">
@@ -39,7 +39,19 @@
         <span></span>
       </button>
       <div class="navbar-menu" id="navbar-menu">
+        <!-- Now Playing indicator for movies/series -->
+        <a href="#" class="now-playing-indicator hidden" id="now-playing-indicator" data-page="watch">
+          <span class="now-playing-icon">▶</span>
+          <span class="now-playing-text" id="now-playing-text">Now Playing</span>
+        </a>
         <a href="#" class="nav-link active" data-page="home">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+              class="icon">
+              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+            </svg></span>
+          <span>Home</span>
+        </a>
+        <a href="#" class="nav-link" data-page="live">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
               class="icon">
               <path
@@ -83,8 +95,14 @@
 
     <!-- Main Content Area -->
     <main class="main-content">
-      <!-- Home Page -->
+      <!-- Home (Dashboard) Page -->
       <div id="page-home" class="page active">
+        <!-- Content will be rendered by HomePage.js -->
+        <div class="loading-state">Loading Dashboard...</div>
+      </div>
+
+      <!-- Live TV Page (formerly Home) -->
+      <div id="page-live" class="page">
         <div class="home-layout">
           <!-- Channel Toggle Button (Mobile) -->
           <button class="channel-toggle-btn" id="channel-toggle-btn">
@@ -148,8 +166,12 @@
               <!-- Custom Controls Overlay -->
               <div class="watch-overlay hidden" id="player-controls-overlay">
                 <!-- Top Bar -->
-                <div class="watch-top-bar">
+                <div class="watch-top-bar live-header">
                   <h2 class="watch-title-overlay" id="player-channel-name"></h2>
+                  <div class="player-badges">
+                    <div class="transcode-status hidden" id="player-transcode-status">Direct</div>
+                    <div class="quality-badge hidden" id="player-quality-badge"></div>
+                  </div>
                 </div>
 
 
@@ -338,6 +360,7 @@
             </button>
           </div>
         </div>
+
         <div class="series-content">
           <div id="series-grid" class="series-grid">
             <div class="empty-state">
@@ -368,6 +391,7 @@
           <div class="tabs">
             <button class="tab active" data-tab="sources">Sources</button>
             <button class="tab" data-tab="player">Player</button>
+            <button class="tab" data-tab="transcode">Transcoding</button>
             <button class="tab" data-tab="content">Manage Content</button>
             <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users</button>
           </div>
@@ -484,10 +508,90 @@
             </div>
 
             <div class="settings-section">
-              <h3>Streaming</h3>
+              <h3>Keyboard Shortcuts</h3>
+              <div class="shortcuts-grid">
+                <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
+                <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
+                <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
+                <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
+                <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
+                <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
+                <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transcoding Tab -->
+          <div id="tab-transcode" class="tab-content">
+            <div class="settings-section">
+              <h3>Detected Hardware</h3>
+              <div id="hw-info-container" class="hw-info-container">
+                <p class="hint">Loading hardware information...</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Encoder Settings</h3>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Hardware Encoder</span>
+                  <span class="setting-hint">Select which GPU encoder to use for transcoding. Auto will use the best
+                    available.</span>
+                </div>
+                <select id="setting-hw-encoder" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="auto">Auto (Recommended)</option>
+                  <option value="nvenc">NVIDIA NVENC</option>
+                  <option value="amf">AMD AMF</option>
+                  <option value="qsv">Intel QuickSync</option>
+                  <option value="vaapi">VAAPI (Linux)</option>
+                  <option value="software">Software (CPU)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Max Resolution</span>
+                  <span class="setting-hint">Limit transcoded output resolution. Lower = faster, more
+                    compatible.</span>
+                </div>
+                <select id="setting-max-resolution" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="4k">4K (2160p)</option>
+                  <option value="1080p" selected>1080p (Full HD)</option>
+                  <option value="720p">720p (HD)</option>
+                  <option value="480p">480p (SD)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Quality Preset</span>
+                  <span class="setting-hint">Higher quality uses more bandwidth and CPU/GPU.</span>
+                </div>
+                <select id="setting-quality" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="high">High</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="low">Low (Fastest)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Audio Mix Preset</span>
+                  <span class="setting-hint">How multi-channel audio (5.1/7.1) is mixed down to stereo for browser
+                    playback.</span>
+                </div>
+                <select id="setting-audio-mix" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="auto">Auto (Smart Copy/ITU)</option>
+                  <option value="itu">ITU-R BS.775 (Balanced)</option>
+                  <option value="night">Night Mode (Dialogue Boost)</option>
+                  <option value="cinematic">Cinematic (Wide)</option>
+                  <option value="passthrough">Passthrough (Copy)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Stream Processing</h3>
               <div class="setting-item">
                 <label class="setting-toggle">
-                  <input type="checkbox" id="setting-auto-transcode">
+                  <input type="checkbox" id="setting-auto-transcode-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
@@ -498,18 +602,7 @@
               </div>
               <div class="setting-item">
                 <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-proxy">
-                  <span class="toggle-slider"></span>
-                </label>
-                <div class="setting-info">
-                  <span class="setting-label">Force Backend Proxy</span>
-                  <span class="setting-hint">Route all streams through the proxy server. Enable if streams don't play
-                    directly.</span>
-                </div>
-              </div>
-              <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-transcode">
+                  <input type="checkbox" id="setting-force-transcode-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
@@ -520,13 +613,25 @@
               </div>
               <div class="setting-item">
                 <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-remux">
+                  <input type="checkbox" id="setting-force-video-transcode-tc">
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Force Video Transcode</span>
+                  <span class="setting-hint">Force full video transcoding (burn-in subtitles, incompatible video).
+                    Uses
+                    HW encoder.</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-force-remux-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
                   <span class="setting-label">Force Remux</span>
-                  <span class="setting-hint">Remux streams to MP4 container. Enable for raw .ts streams
-                    from IPTV middleware like m3u-editor or dispatcharr.</span>
+                  <span class="setting-hint">Remux streams to MP4 container. Enable for raw .ts streams from IPTV
+                    middleware like m3u-editor or dispatcharr.</span>
                 </div>
               </div>
               <div class="setting-item">
@@ -535,7 +640,7 @@
                   <span class="setting-hint">Container format for Xtream streams. Try TS if you experience buffering
                     issues.</span>
                 </div>
-                <select id="setting-stream-format" class="source-select" style="width: auto; min-width: 200px;">
+                <select id="setting-stream-format-tc" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="m3u8">HLS (m3u8) - Recommended</option>
                   <option value="ts">MPEG-TS (ts) - Better buffer</option>
                 </select>
@@ -543,15 +648,42 @@
             </div>
 
             <div class="settings-section">
-              <h3>Keyboard Shortcuts</h3>
-              <div class="shortcuts-grid">
-                <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
-                <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
-                <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
-                <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
-                <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
-                <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
-                <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+              <h3>HTTP Settings</h3>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">User-Agent</span>
+                  <span class="setting-hint">HTTP User-Agent for stream requests. Try VLC if your provider blocks
+                    Chrome.</span>
+                </div>
+                <select id="setting-user-agent-tc" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="chrome">Chrome (Default)</option>
+                  <option value="vlc">VLC</option>
+                  <option value="tivimate">TiviMate</option>
+                  <option value="custom">Custom...</option>
+                </select>
+              </div>
+              <div class="setting-item" id="custom-user-agent-container-tc" style="display: none;">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Custom User-Agent</span>
+                  <span class="setting-hint">Enter your own User-Agent string.</span>
+                </div>
+                <input type="text" id="setting-user-agent-custom-tc" class="search-input" style="width: 300px;"
+                  placeholder="Custom User-Agent string...">
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Network</h3>
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-force-proxy-tc">
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Force Backend Proxy</span>
+                  <span class="setting-hint">Route all streams through the server to bypass CORS restrictions. Enable if
+                    streams don't play directly.</span>
+                </div>
               </div>
             </div>
           </div>
@@ -600,6 +732,7 @@
                   <thead>
                     <tr>
                       <th>Username</th>
+                      <th>Email</th>
                       <th>Role</th>
                       <th>Created</th>
                       <th>Actions</th>
@@ -648,7 +781,7 @@
           <!-- Player Controls Overlay -->
           <div class="watch-overlay" id="watch-overlay">
             <!-- Top Bar: Back + Title -->
-            <div class="watch-top-bar">
+            <div class="watch-top-bar vod-header">
               <button class="watch-back-btn" id="watch-back-btn" title="Back">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                   <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
@@ -657,6 +790,10 @@
               <div class="watch-title-info">
                 <h3 class="watch-title" id="watch-title"></h3>
                 <p class="watch-subtitle" id="watch-subtitle"></p>
+              </div>
+              <div class="player-badges">
+                <div class="transcode-status hidden" id="watch-transcode-status">Direct</div>
+                <div class="quality-badge hidden" id="watch-quality-badge"></div>
               </div>
             </div>
 
@@ -865,6 +1002,57 @@
       </svg> Hide</button>
   </div>
 
+  <!-- Edit User Modal -->
+  <div class="modal-overlay" id="edit-user-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit User</h3>
+        <button class="modal-close" id="edit-user-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="edit-user-form">
+          <input type="hidden" id="edit-user-id">
+
+          <div class="modal-form-group">
+            <label for="edit-username">Username</label>
+            <input type="text" id="edit-username" name="username" class="form-input" required>
+          </div>
+
+          <div class="modal-form-group">
+            <label for="edit-email">Email</label>
+            <input type="text" id="edit-email" class="form-input" readonly disabled placeholder="No email associated">
+          </div>
+
+          <div class="modal-form-group">
+            <label for="edit-role">Role</label>
+            <select id="edit-role" name="role" class="form-input" required>
+              <option value="viewer">Viewer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <div class="modal-form-group">
+            <label for="edit-password">New Password</label>
+            <input type="password" id="edit-password" name="password" class="form-input"
+              placeholder="Leave blank to keep current">
+            <p class="hint" id="edit-password-hint" style="margin-top: 4px;">Optional. Leave blank to keep unchanged.
+            </p>
+          </div>
+
+          <div class="modal-form-group hidden" id="oidc-info-group">
+            <label>OIDC Provider ID</label>
+            <code id="edit-oidc-id"
+              style="font-size: 0.8rem; color: var(--color-text-muted); padding: 4px; background: rgba(0,0,0,0.3); border-radius: 4px; display: block;"></code>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="edit-user-cancel">Cancel</button>
+        <button class="btn btn-primary" id="edit-user-save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JavaScript -->
   <script src="/js/icons.js"></script>
   <script src="/js/api.js?v=2"></script>
@@ -872,13 +1060,28 @@
   <script src="/js/components/ChannelList.js?v=3"></script>
   <script src="/js/components/SourceManager.js?v=2"></script>
   <script src="/js/components/EpgGuide.js?v=2"></script>
-  <script src="/js/pages/Home.js?v=3"></script>
+  <script src="/js/pages/HomePage.js?v=2"></script>
+  <script src="/js/pages/LivePage.js?v=2"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=4"></script>
   <script src="/js/pages/SeriesPage.js?v=1"></script>
   <script src="/js/pages/Settings.js?v=2"></script>
   <script src="/js/pages/WatchPage.js?v=1"></script>
   <script src="/js/app.js?v=4"></script>
+  <script>
+    // Check for SSO token in URL
+    (function () {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+      if (token) {
+        console.log('SSO Login successful, saving token...');
+        localStorage.setItem('authToken', token);
+        // Clean URL without reloading
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    })();
+  </script>
 </body>
 
 </html>

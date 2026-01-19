@@ -102,10 +102,106 @@ function initSchema() {
         );
     `);
 
+    // User Favorites (per-user)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source_id INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            item_type TEXT NOT NULL, -- 'channel', 'movie', 'series'
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, source_id, item_id, item_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id);
+        CREATE INDEX IF NOT EXISTS idx_favorites_user_type ON favorites(user_id, item_type);
+    `);
+
+    // Watch History (per-user)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS watch_history (
+            id TEXT PRIMARY KEY, -- Composite key: user_id:item_id
+            user_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL, -- 'movie', 'episode'
+            item_id TEXT NOT NULL, -- The original item ID (stream_id or composite)
+            parent_id TEXT, -- For episodes (series ID)
+            progress INTEGER DEFAULT 0, -- Current position in seconds
+            duration INTEGER DEFAULT 0, -- Total duration in seconds
+            updated_at INTEGER NOT NULL, -- Timestamp
+            data JSON -- Snapshot of item data (title, poster, etc)
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_user_updated ON watch_history(user_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_history_user_item ON watch_history(user_id, item_id);
+    `);
+
     console.log('[SQLite] Schema initialized');
 }
 
+// ============================================================
+// Favorites CRUD Operations
+// ============================================================
+const favorites = {
+    getAll(userId, sourceId = null, itemType = null) {
+        const db = getDb();
+        let sql = 'SELECT * FROM favorites WHERE user_id = ?';
+        const params = [userId];
+
+        if (sourceId) {
+            sql += ' AND source_id = ?';
+            params.push(sourceId);
+        }
+        if (itemType) {
+            sql += ' AND item_type = ?';
+            params.push(itemType);
+        }
+
+        sql += ' ORDER BY created_at DESC';
+        return db.prepare(sql).all(...params);
+    },
+
+    add(userId, sourceId, itemId, itemType = 'channel') {
+        const db = getDb();
+        const stmt = db.prepare(`
+            INSERT OR IGNORE INTO favorites (user_id, source_id, item_id, item_type)
+            VALUES (?, ?, ?, ?)
+        `);
+        const result = stmt.run(userId, sourceId, itemId, itemType);
+        return result.changes > 0;
+    },
+
+    remove(userId, sourceId, itemId, itemType = 'channel') {
+        const db = getDb();
+        const stmt = db.prepare(`
+            DELETE FROM favorites 
+            WHERE user_id = ? AND source_id = ? AND item_id = ? AND item_type = ?
+        `);
+        const result = stmt.run(userId, sourceId, itemId, itemType);
+        return result.changes > 0;
+    },
+
+    isFavorite(userId, sourceId, itemId, itemType = 'channel') {
+        const db = getDb();
+        const row = db.prepare(`
+            SELECT 1 FROM favorites 
+            WHERE user_id = ? AND source_id = ? AND item_id = ? AND item_type = ?
+        `).get(userId, sourceId, itemId, itemType);
+        return !!row;
+    },
+
+    // Get all favorites for a user, grouped by type (for bulk checks)
+    getAllAsSet(userId) {
+        const db = getDb();
+        const rows = db.prepare('SELECT source_id, item_id, item_type FROM favorites WHERE user_id = ?').all(userId);
+        const set = new Set();
+        for (const row of rows) {
+            set.add(`${row.source_id}:${row.item_id}:${row.item_type}`);
+        }
+        return set;
+    }
+};
+
 module.exports = {
     getDb,
-    initSchema
+    initSchema,
+    favorites
 };
