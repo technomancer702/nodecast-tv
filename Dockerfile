@@ -11,7 +11,7 @@
 # Run with VAAPI: docker run --device /dev/dri:/dev/dri --group-add video ...
 # Run with NVENC: docker run --gpus all ...
 
-FROM node:20-slim
+FROM node:20-bookworm-slim
 
 # Install FFmpeg, build dependencies, and hardware acceleration drivers
 ENV DEBIAN_FRONTEND=noninteractive
