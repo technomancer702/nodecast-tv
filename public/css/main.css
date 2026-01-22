@@ -113,6 +113,11 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* fallback */
+  height: 100dvh;
+  /* dynamic viewport height for modern browsers */
+  height: -webkit-fill-available;
+  /* iOS Safari fallback */
 }
 
 /* Typography */
@@ -3334,6 +3339,9 @@ kbd {
   position: relative;
   width: 100%;
   height: calc(100vh - var(--navbar-height));
+  /* fallback */
+  height: calc(100dvh - var(--navbar-height));
+  /* dynamic viewport for modern browsers */
   min-height: 400px;
   background: #000;
 }
