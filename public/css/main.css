@@ -4,6 +4,10 @@
 
 /* CSS Variables */
 :root {
+  /* iOS Safari toolbar compensation (set dynamically by JS) */
+  --ios-ui-bottom: 0px;
+
+
   /* Colors */
   --color-bg-primary: #0a0a0f;
   --color-bg-secondary: #12121a;
@@ -312,6 +316,15 @@ h4 {
   display: flex;
   height: 100%;
   position: relative;
+}
+
+/* Fix scroll sidebar on desktop (Safari / flex bug) */
+.main-content,
+.page,
+.home-layout,
+.channel-sidebar,
+.channel-list {
+  min-height: 0;
 }
 
 /* Floating Channel Toggle Button (Mobile) */
@@ -671,6 +684,15 @@ h4 {
   overflow: hidden;
   min-height: 0;
   /* Allow flex child to shrink */
+}
+
+/* Live TV player controls overlay - iOS Safari safe positioning */
+#player-controls-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ios-ui-bottom, 0px));
+  box-sizing: border-box;
 }
 
 /* Favorites */

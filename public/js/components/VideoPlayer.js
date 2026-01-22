@@ -11,6 +11,13 @@ function isMobile() {
 class VideoPlayer {
     constructor() {
         this.video = document.getElementById('video-player');
+
+        // iOS: ensure inline playback (not fullscreen by default)
+        if (this.video) {
+            this.video.setAttribute('playsinline', '');
+            this.video.setAttribute('webkit-playsinline', '');
+        }
+
         this.container = document.querySelector('.video-container');
         this.overlay = document.getElementById('player-overlay');
         this.nowPlaying = document.getElementById('now-playing');
@@ -149,6 +156,38 @@ class VideoPlayer {
         // Elements
         this.controlsOverlay = document.getElementById('player-controls-overlay');
         this.loadingSpinner = document.getElementById('player-loading');
+
+        // iOS Safari: detect and compensate for floating bottom toolbar
+        const updateIosUiBottom = () => {
+            let uiBottom = 0;
+            if (window.visualViewport) {
+                const vv = window.visualViewport;
+                uiBottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+            }
+            document.documentElement.style.setProperty('--ios-ui-bottom', uiBottom + 'px');
+        };
+
+        updateIosUiBottom();
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', updateIosUiBottom);
+            window.visualViewport.addEventListener('scroll', updateIosUiBottom);
+        } else {
+            window.addEventListener('resize', updateIosUiBottom);
+        }
+
+        // iOS: use custom --vh unit to avoid 100vh issues with dynamic toolbar
+        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+        if (isIOS && this.container) {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+            this.container.style.height = 'calc(var(--vh) * 100)';
+        }
+
+        // Apply safe area + iOS toolbar padding to controls overlay
+        if (this.controlsOverlay) {
+            this.controlsOverlay.style.paddingBottom = 'calc(env(safe-area-inset-bottom, 0px) + var(--ios-ui-bottom, 0px) + 12px)';
+        }
 
         const btnPlay = document.getElementById('btn-play');
         const btnMute = document.getElementById('btn-mute');

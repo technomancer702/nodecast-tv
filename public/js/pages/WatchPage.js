@@ -11,6 +11,12 @@ class WatchPage {
         this.video = document.getElementById('watch-video');
         this.overlay = document.getElementById('watch-overlay');
 
+        // iOS: ensure inline playback (not fullscreen by default)
+        if (this.video) {
+            this.video.setAttribute('playsinline', '');
+            this.video.setAttribute('webkit-playsinline', '');
+        }
+
         // Top bar
         this.backBtn = document.getElementById('watch-back-btn');
         this.titleEl = document.getElementById('watch-title');
@@ -90,6 +96,39 @@ class WatchPage {
     }
 
     init() {
+        // iOS Safari: detect and compensate for floating bottom toolbar
+        const updateIosUiBottom = () => {
+            let uiBottom = 0;
+            if (window.visualViewport) {
+                const vv = window.visualViewport;
+                uiBottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+            }
+            document.documentElement.style.setProperty('--ios-ui-bottom', uiBottom + 'px');
+        };
+
+        updateIosUiBottom();
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', updateIosUiBottom);
+            window.visualViewport.addEventListener('scroll', updateIosUiBottom);
+        } else {
+            window.addEventListener('resize', updateIosUiBottom);
+        }
+
+        // iOS: use custom --vh unit to avoid 100vh issues with dynamic toolbar
+        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+        const watchVideoSection = document.querySelector('.watch-video-section');
+        if (isIOS && watchVideoSection) {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+            watchVideoSection.style.height = 'calc(var(--vh) * 100)';
+        }
+
+        // Apply safe area + iOS toolbar padding to overlay
+        if (this.overlay) {
+            this.overlay.style.paddingBottom = 'calc(env(safe-area-inset-bottom, 0px) + var(--ios-ui-bottom, 0px) + 12px)';
+        }
+
         // Back button
         this.backBtn?.addEventListener('click', () => this.goBack());
 
