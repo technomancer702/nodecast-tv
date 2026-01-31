@@ -807,18 +807,7 @@ class ChannelList {
             sourceType: 'xtream'
         }));
 
-        // Deduplicate by name within the same group (Xtream often sends backup streams with same name)
-        const seen = new Set();
-        const uniqueChannels = [];
-        for (const ch of channelList) {
-            const key = `${ch.groupTitle}|${ch.name}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                uniqueChannels.push(ch);
-            }
-        }
-
-        this.channels = this.channels.concat(uniqueChannels);
+        this.channels = this.channels.concat(channelList);
     }
 
     /**
