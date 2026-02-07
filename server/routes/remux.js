@@ -61,9 +61,11 @@ router.get('/', async (req, res) => {
         '-c', 'copy',
         // Ensure extradata is correctly extracted/converted (fixes Annex B -> AVCC issues in Firefox)
         '-bsf:v', 'dump_extra',
-        // NOTE: We intentionally do NOT use -bsf:a aac_adtstoasc here
-        // That filter only works for AAC audio and breaks AC3/EAC3/MP3.
-        // If AAC audio from MPEG-TS fails in MP4, use /api/transcode instead.
+            // NOTE: We add the audio bitstream filter only when the source
+            // audio codec is AAC. Some TS streams carry AAC in ADTS which
+            // must be converted to MP4 format using aac_adtstoasc. This
+            // filter breaks non-AAC audio (AC3/EAC3/MP3), so we detect
+            // codec via ffprobe and add it conditionally below.
         // Handle timestamp discontinuities at output
         '-fps_mode', 'passthrough',
         '-max_muxing_queue_size', '1024',
@@ -74,6 +76,62 @@ router.get('/', async (req, res) => {
     ];
 
     console.log(`[Remux] Full command: ${ffmpegPath} ${args.join(' ')}`);
+
+    // If ffprobe is available, probe the audio codec and conditionally
+    // add the aac ADTS -> ASC bitstream filter when needed.
+    async function probeAudioCodec(url, ffprobePath, userAgent) {
+        return new Promise((resolve) => {
+            if (!ffprobePath) return resolve(null);
+            const probeArgs = [
+                '-v', 'error',
+                '-user_agent', userAgent || 'Mozilla/5.0',
+                '-print_format', 'json',
+                '-show_streams',
+                '-probesize', '5000000',
+                '-analyzeduration', '5000000',
+                url
+            ];
+            try {
+                const p = spawn(ffprobePath, probeArgs);
+                let stdout = '';
+                let stderr = '';
+                const timer = setTimeout(() => {
+                    try { p.kill('SIGKILL'); } catch (e) {}
+                    resolve(null);
+                }, 3000);
+                p.stdout.on('data', d => { stdout += d.toString(); });
+                p.stderr.on('data', d => { stderr += d.toString(); });
+                p.on('close', (code) => {
+                    clearTimeout(timer);
+                    try {
+                        const res = JSON.parse(stdout || '{}');
+                        const streams = res.streams || [];
+                        const audio = streams.find(s => s.codec_type === 'audio');
+                        const audioCodec = audio?.codec_name?.toLowerCase() || null;
+                        resolve(audioCodec);
+                    } catch (e) {
+                        resolve(null);
+                    }
+                });
+                p.on('error', () => { clearTimeout(timer); resolve(null); });
+            } catch (e) {
+                return resolve(null);
+            }
+        });
+    }
+
+    // Probe and update args before spawning ffmpeg
+    try {
+        const audioCodec = await probeAudioCodec(url, req.app.locals.ffprobePath, userAgent);
+        if (audioCodec && audioCodec.includes('aac')) {
+            console.log('[Remux] Detected AAC audio, adding -bsf:a aac_adtstoasc');
+            // Insert audio bsf after dump_extra (video bsf)
+            args.splice(args.indexOf('-bsf:v') + 2, 0, '-bsf:a', 'aac_adtstoasc');
+        }
+    } catch (e) {
+        // Non-fatal: proceed without audio BSF
+        console.warn('[Remux] Audio probe failed, proceeding without aac_adtstoasc');
+    }
 
     let ffmpeg;
     try {
