@@ -193,14 +193,17 @@ class TranscodeSession extends EventEmitter {
         }
 
         // Input options (common)
+        // Lower probe/analyze values for faster startup (we already probed separately)
         args.push(
-            '-probesize', '5000000',
-            '-analyzeduration', '5000000',
+            '-probesize', '2000000',
+            '-analyzeduration', '3000000',
             '-fflags', '+genpts+discardcorrupt',
             '-err_detect', 'ignore_err',
             '-reconnect', '1',
             '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '3'
+            '-reconnect_delay_max', '3',
+            // Prevent Range/HEAD requests that some providers reject
+            '-seekable', '0'
         );
 
         args.push('-i', this.url);
@@ -218,13 +221,18 @@ class TranscodeSession extends EventEmitter {
         if (videoMode === 'copy') {
             args.push('-c:v', 'copy');
 
-            // Critical for MKV/MP4 -> TS copy: Convert bitstream from AVCC/HVCC to Annex B
-            if (this.options.videoCodec === 'hevc' || this.options.videoCodec === 'h265') {
+            // Bitstream filter: only needed for MP4/MKV -> TS (AVCC/HVCC to Annex B)
+            // HLS/TS sources already use Annex B, so use dump_extra to ensure SPS/PPS
+            // are present at keyframes without risking corruption from mp4toannexb
+            const isHlsOrTs = this.url.includes('.m3u8') || this.url.includes('.ts');
+            if (isHlsOrTs) {
+                // TS/HLS input: just ensure extradata is in the bitstream
+                args.push('-bsf:v', 'dump_extra');
+            } else if (this.options.videoCodec === 'hevc' || this.options.videoCodec === 'h265') {
                 args.push('-bsf:v', 'hevc_mp4toannexb');
             } else if (this.options.videoCodec === 'h264' || this.options.videoCodec === 'avc') {
                 args.push('-bsf:v', 'h264_mp4toannexb');
             } else {
-                // Fallback (e.g. unknown codec), try strict extraction
                 args.push('-bsf:v', 'dump_extra');
             }
         } else {
