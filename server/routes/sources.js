@@ -5,6 +5,7 @@ const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
 const syncService = require('../services/syncService');
 const m3uParser = require('../services/m3uParser');
+const { normalizeSourceUrl } = require('../services/urlNormalizer');
 
 // Get all sources
 router.get('/', async (req, res) => {
@@ -73,7 +74,13 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        const source = await sources.create({ type, name, url, username, password });
+        const source = await sources.create({
+            type,
+            name,
+            url: normalizeSourceUrl(url),
+            username,
+            password
+        });
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
         res.status(201).json(source);
@@ -94,7 +101,7 @@ router.put('/:id', async (req, res) => {
         const { name, url, username, password } = req.body;
         const updated = await sources.update(req.params.id, {
             name: name || existing.name,
-            url: url || existing.url,
+            url: url ? normalizeSourceUrl(url) : existing.url,
             username: username !== undefined ? username : existing.username,
             password: password !== undefined ? password : existing.password
         });

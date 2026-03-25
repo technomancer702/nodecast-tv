@@ -3,10 +3,13 @@
  * Handles authentication and API calls to Xtream servers
  */
 
+const { normalizeSourceUrl } = require('./urlNormalizer');
+
+
 class XtreamApi {
     constructor(baseUrl, username, password) {
         // Clean up base URL
-        this.baseUrl = baseUrl.replace(/\/+$/, '');
+                this.baseUrl = normalizeSourceUrl(baseUrl);
         this.username = username;
         this.password = password;
     }
@@ -28,6 +31,7 @@ class XtreamApi {
         }
         return url.toString();
     }
+
 
     /**
      * Make API request

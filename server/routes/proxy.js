@@ -12,6 +12,7 @@ const https = require('https');
 const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 const { Readable } = require('stream');
+const { normalizeSourceUrl } = require('../services/urlNormalizer');
 
 // Default cache max age in hours
 const DEFAULT_MAX_AGE_HOURS = 24;
@@ -245,7 +246,7 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
         // Format: http://server:port/series/username/password/streamId.container (for series)
 
         let streamUrl;
-        const baseUrl = source.url.replace(/\/$/, ''); // Remove trailing slash
+        const baseUrl = normalizeSourceUrl(source.url);
 
         if (type === 'live') {
             streamUrl = `${baseUrl}/live/${source.username}/${source.password}/${streamId}.${container}`;
