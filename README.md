@@ -46,7 +46,7 @@ nodecast-tv is a modern, web-based IPTV player featuring Live TV, EPG, Movies (V
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/nodecast-tv.git
+    git clone https://github.com/technomancer702/nodecast-tv.git
     cd nodecast-tv
     ```
 
@@ -114,7 +114,7 @@ Ensure you have the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacente
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [gpu, utility, video, compute]
 ```
 
 **Verify:**
