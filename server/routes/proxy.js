@@ -36,7 +36,7 @@ function getCategoriesFromDb(sourceId, type, includeHidden = false) {
 function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = false) {
     const db = getDb();
     let query = `
-        SELECT item_id, name, stream_icon, added_at, rating, container_extension, year, category_id, data
+        SELECT item_id, name, parent_id, stream_icon, stream_url, added_at, rating, container_extension, year, category_id, data
         FROM playlist_items 
         WHERE source_id = ? AND type = ?
     `;
@@ -67,14 +67,95 @@ function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = fal
             name: item.name,
             stream_icon: item.stream_icon,
             cover: item.stream_icon, // series/vod often use cover
+            stream_url: item.stream_url || data.stream_url || null,
             added: item.added_at,
             rating: item.rating,
             container_extension: item.container_extension,
             category_id: item.category_id,
+            parent_id: item.parent_id,
             // Normalize EPG channel ID: Xtream uses epg_channel_id, M3U uses tvgId
             epg_channel_id: data.epg_channel_id || data.tvgId || null
         };
     });
+}
+
+function getM3uStreamUrl(sourceId, itemId, type) {
+    const db = getDb();
+    const dbType = type === 'series' ? 'episode' : type;
+    const row = db.prepare(`
+        SELECT stream_url, data
+        FROM playlist_items
+        WHERE source_id = ? AND type = ? AND item_id = ?
+        LIMIT 1
+    `).get(sourceId, dbType, String(itemId));
+
+    if (!row) return null;
+
+    const data = JSON.parse(row.data || '{}');
+    return row.stream_url || data.stream_url || data.url || null;
+}
+
+function getM3uSeriesInfo(sourceId, seriesId) {
+    const db = getDb();
+    const seriesRow = db.prepare(`
+        SELECT item_id, name, stream_icon, rating, year, data
+        FROM playlist_items
+        WHERE source_id = ? AND type = 'series' AND item_id = ?
+        LIMIT 1
+    `).get(sourceId, String(seriesId));
+
+    if (!seriesRow) {
+        return null;
+    }
+
+    const seriesData = JSON.parse(seriesRow.data || '{}');
+    const episodeRows = db.prepare(`
+        SELECT item_id, name, parent_id, stream_icon, stream_url, container_extension, year, data
+        FROM playlist_items
+        WHERE source_id = ? AND type = 'episode' AND parent_id = ? AND is_hidden = 0
+    `).all(sourceId, String(seriesId));
+
+    const episodes = {};
+
+    for (const row of episodeRows) {
+        const data = JSON.parse(row.data || '{}');
+        const seasonNum = String(data.season_num || 1);
+        if (!episodes[seasonNum]) {
+            episodes[seasonNum] = [];
+        }
+
+        episodes[seasonNum].push({
+            ...data,
+            id: row.item_id,
+            title: data.title || row.name,
+            episode_num: data.episode_num || 1,
+            season_num: data.season_num || 1,
+            container_extension: row.container_extension || data.container_extension || 'mp4',
+            stream_icon: row.stream_icon || data.stream_icon || null,
+            stream_url: row.stream_url || data.stream_url || null,
+            year: row.year || data.year || null
+        });
+    }
+
+    Object.values(episodes).forEach(list => {
+        list.sort((a, b) => {
+            const seasonDiff = (a.season_num || 1) - (b.season_num || 1);
+            if (seasonDiff !== 0) return seasonDiff;
+            return (a.episode_num || 1) - (b.episode_num || 1);
+        });
+    });
+
+    return {
+        info: {
+            ...seriesData,
+            series_id: seriesRow.item_id,
+            name: seriesRow.name,
+            cover: seriesRow.stream_icon,
+            rating: seriesRow.rating,
+            year: seriesRow.year || seriesData.releaseDate || null
+        },
+        episodes
+    };
 }
 
 
@@ -195,8 +276,15 @@ router.get('/xtream/:sourceId/series_info', async (req, res) => {
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
         if (cached) return res.json(cached);
 
-        const api = xtreamApi.createFromSource(source);
-        const data = await api.getSeriesInfo(seriesId);
+        let data;
+        if (source.type === 'm3u') {
+            data = getM3uSeriesInfo(source.id, seriesId);
+            if (!data) return res.status(404).json({ error: 'Series not found' });
+        } else {
+            const api = xtreamApi.createFromSource(source);
+            data = await api.getSeriesInfo(seriesId);
+        }
+
         cache.set('xtream', source.id, cacheKey, data);
         res.json(data);
     } catch (err) {
@@ -231,13 +319,21 @@ router.get('/xtream/:sourceId/vod_info', async (req, res) => {
 router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
     try {
         const source = await sources.getById(req.params.sourceId);
-        if (!source || source.type !== 'xtream') {
-            return res.status(404).json({ error: 'Xtream source not found' });
+        if (!source || !['xtream', 'm3u'].includes(source.type)) {
+            return res.status(404).json({ error: 'Source not found' });
         }
 
         const streamId = req.params.streamId;
         const type = req.params.type || 'live';
         const container = req.query.container || 'm3u8';
+
+        if (source.type === 'm3u') {
+            const streamUrl = getM3uStreamUrl(source.id, streamId, type);
+            if (!streamUrl) {
+                return res.status(404).json({ error: 'M3U stream not found' });
+            }
+            return res.json({ url: streamUrl });
+        }
 
         // Construct the Xtream stream URL
         // Format: http://server:port/live/username/password/streamId.container (for live)
