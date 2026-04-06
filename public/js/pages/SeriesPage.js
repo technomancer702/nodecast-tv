@@ -105,7 +105,7 @@ class SeriesPage {
     async loadSources() {
         try {
             const allSources = await API.sources.getAll();
-            this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
+            this.sources = allSources.filter(s => ['xtream', 'm3u'].includes(s.type) && s.enabled);
 
             this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
             this.sources.forEach(s => {

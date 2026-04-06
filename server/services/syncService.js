@@ -2,6 +2,7 @@ const { getDb } = require('../db/sqlite');
 const { sources, settings } = require('../db'); // For source config and settings
 const xtreamApi = require('./xtreamApi');
 const m3uParser = require('./m3uParser');
+const { classifyEntry, makeCategoryId, stableHash } = require('./m3uClassifier');
 const epgParser = require('./epgParser');
 
 // Sync tracking
@@ -270,22 +271,27 @@ class SyncService {
         const stmt = db.prepare(`
             INSERT INTO playlist_items (
                 id, source_id, item_id, type, name, category_id, 
-                stream_icon, stream_url, container_extension, 
+                parent_id, stream_icon, stream_url, container_extension, 
                 rating, year, added_at, data
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                parent_id = excluded.parent_id,
                 name = excluded.name,
                 category_id = excluded.category_id,
                 stream_icon = excluded.stream_icon,
+                stream_url = excluded.stream_url,
                 container_extension = excluded.container_extension,
+                rating = excluded.rating,
+                year = excluded.year,
+                added_at = excluded.added_at,
                 data = excluded.data
         `);
 
         const insertBatch = db.transaction((batch) => {
             for (const item of batch) {
                 // Map fields based on type
-                let itemId, name, catId, icon, container;
+                let itemId, name, catId, icon, container, parentId = null, streamUrl = null;
                 let rating = null, year = null, added = null;
 
                 if (type === 'live') {
@@ -294,6 +300,7 @@ class SyncService {
                     catId = item.category_id;
                     icon = item.stream_icon;
                     added = item.added;
+                    streamUrl = item.stream_url || item.url || null;
                 } else if (type === 'movie') {
                     itemId = item.stream_id;
                     name = item.name || `Movie ${item.stream_id}`;
@@ -301,15 +308,27 @@ class SyncService {
                     icon = item.stream_icon; // or cover
                     container = item.container_extension;
                     rating = item.rating;
+                    year = item.year;
                     added = item.added;
+                    streamUrl = item.stream_url || item.url || null;
                 } else if (type === 'series') {
                     itemId = item.series_id;
                     name = item.name || `Series ${item.series_id}`;
                     catId = item.category_id;
-                    icon = item.cover;
+                    icon = item.cover || item.stream_icon;
                     rating = item.rating;
-                    year = item.releaseDate;
+                    year = item.releaseDate || item.year;
                     added = item.last_modified;
+                } else if (type === 'episode') {
+                    itemId = item.stream_id;
+                    name = item.name || item.title || `Episode ${item.stream_id}`;
+                    catId = item.category_id;
+                    parentId = item.parent_id || item.series_id || null;
+                    icon = item.stream_icon || item.cover;
+                    container = item.container_extension;
+                    year = item.year;
+                    added = item.added;
+                    streamUrl = item.stream_url || item.url || null;
                 }
 
                 const id = `${sourceId}:${itemId}`;
@@ -322,8 +341,9 @@ class SyncService {
                     type,
                     name,
                     String(catId),
+                    parentId,
                     icon,
-                    null, // Direct URL not stored for Xtream usually, built on fly
+                    streamUrl,
                     container,
                     rating,
                     year,
@@ -348,6 +368,18 @@ class SyncService {
 
         console.log(`[Sync] Saved ${items.length} ${type} items`);
         return syncedIds;
+    }
+
+    purgeAllItemsByType(sourceId, type) {
+        const db = getDb();
+        const deleted = db.prepare(`
+            DELETE FROM playlist_items
+            WHERE source_id = ? AND type = ?
+        `).run(sourceId, type);
+
+        if (deleted.changes > 0) {
+            console.log(`[Sync] Purged all ${deleted.changes} ${type} items`);
+        }
     }
 
     /**
@@ -507,58 +539,183 @@ class SyncService {
 
         logMemory();
 
-        const allGroups = new Set();
-        const allSyncedIds = new Set(); // Collect IDs across all batches
-        let totalChannels = 0;
+        const liveGroups = new Set();
+        const movieGroups = new Set();
+        const seriesGroups = new Set();
+        const liveSyncedIds = new Set();
+        const movieSyncedIds = new Set();
+        const episodeSyncedIds = new Set();
+        const seriesSyncedIds = new Set();
+        const seriesMap = new Map();
+        let totalEntries = 0;
+        let totalLive = 0;
+        let totalMovies = 0;
+        let totalEpisodes = 0;
         let batchCount = 0;
 
         // Stream and process in batches (default 500 channels per batch)
         for await (const batch of m3uParser.fetchAndParseStreaming(source.url)) {
             batchCount++;
 
-            // Map M3U channel format to our schema
-            const playlistItems = batch.channels.map(ch => ({
-                stream_id: ch.id,
-                name: ch.name,
-                category_id: ch.groupTitle || 'Uncategorized',
-                stream_icon: ch.tvgLogo,
-                stream_url: ch.url,
-                tvgId: ch.tvgId || null,
-            }));
+            const liveItems = [];
+            const movieItems = [];
+            const episodeItems = [];
 
-            // Save this batch immediately (skip purge - we'll do it at the end)
-            if (playlistItems.length > 0) {
-                const batchIds = await this.saveStreams(source.id, 'live', playlistItems, { skipPurge: true });
-                batchIds.forEach(id => allSyncedIds.add(id));
-                totalChannels += playlistItems.length;
+            for (const ch of batch.channels) {
+                const classification = classifyEntry(ch);
+                const baseData = {
+                    tvgId: ch.tvgId || null,
+                    tvgName: ch.tvgName || null,
+                    tvgLogo: ch.tvgLogo || null,
+                    groupTitle: classification.groupTitle,
+                    originalName: ch.name,
+                    duration: ch.duration,
+                    stream_url: ch.url
+                };
+
+                totalEntries++;
+
+                if (classification.mediaType === 'movie') {
+                    const categoryId = makeCategoryId('movie', classification.groupTitle);
+                    movieGroups.add(classification.groupTitle);
+                    movieItems.push({
+                        stream_id: `m3u_movie_${stableHash(ch.id)}`,
+                        name: ch.name,
+                        category_id: categoryId,
+                        stream_icon: ch.tvgLogo,
+                        stream_url: ch.url,
+                        container_extension: classification.containerExtension,
+                        year: classification.year,
+                        ...baseData
+                    });
+                    totalMovies++;
+                    continue;
+                }
+
+                if (classification.mediaType === 'episode') {
+                    const categoryId = makeCategoryId('series', classification.groupTitle);
+                    seriesGroups.add(classification.groupTitle);
+
+                    const episode = {
+                        stream_id: `m3u_episode_${stableHash(ch.id)}`,
+                        name: `${classification.seriesTitle} - ${classification.episodeTitle}`,
+                        title: classification.episodeTitle,
+                        category_id: categoryId,
+                        series_id: classification.seriesId,
+                        parent_id: classification.seriesId,
+                        stream_icon: ch.tvgLogo,
+                        stream_url: ch.url,
+                        container_extension: classification.containerExtension,
+                        season_num: classification.seasonNum,
+                        episode_num: classification.episodeNum,
+                        duration: Number.isFinite(ch.duration) && ch.duration > 0 ? ch.duration : null,
+                        year: classification.year,
+                        ...baseData
+                    };
+
+                    episodeItems.push(episode);
+                    totalEpisodes++;
+
+                    if (!seriesMap.has(classification.seriesId)) {
+                        seriesMap.set(classification.seriesId, {
+                            series_id: classification.seriesId,
+                            name: classification.seriesTitle,
+                            category_id: categoryId,
+                            cover: ch.tvgLogo,
+                            stream_icon: ch.tvgLogo,
+                            releaseDate: classification.year,
+                            tvgId: ch.tvgId || null,
+                            episodeCount: 0
+                        });
+                    }
+
+                    const series = seriesMap.get(classification.seriesId);
+                    series.episodeCount += 1;
+                    if (!series.cover && ch.tvgLogo) {
+                        series.cover = ch.tvgLogo;
+                        series.stream_icon = ch.tvgLogo;
+                    }
+                    if (!series.releaseDate && classification.year) {
+                        series.releaseDate = classification.year;
+                    }
+                    continue;
+                }
+
+                liveGroups.add(classification.groupTitle);
+                liveItems.push({
+                    stream_id: ch.id,
+                    name: ch.name,
+                    category_id: classification.groupTitle || 'Uncategorized',
+                    stream_icon: ch.tvgLogo,
+                    stream_url: ch.url,
+                    tvgId: ch.tvgId || null,
+                    ...baseData
+                });
+                totalLive++;
             }
 
-            // Collect groups for category creation at the end
-            batch.groups.forEach(g => allGroups.add(g));
+            if (liveItems.length > 0) {
+                const batchIds = await this.saveStreams(source.id, 'live', liveItems, { skipPurge: true });
+                batchIds.forEach(id => liveSyncedIds.add(id));
+            }
+
+            if (movieItems.length > 0) {
+                const batchIds = await this.saveStreams(source.id, 'movie', movieItems, { skipPurge: true });
+                batchIds.forEach(id => movieSyncedIds.add(id));
+            }
+
+            if (episodeItems.length > 0) {
+                const batchIds = await this.saveStreams(source.id, 'episode', episodeItems, { skipPurge: true });
+                batchIds.forEach(id => episodeSyncedIds.add(id));
+            }
 
             // Log progress every 10 batches
             if (batchCount % 10 === 0) {
-                console.log(`[Sync] Processed ${totalChannels} channels so far...`);
+                console.log(`[Sync] Processed ${totalEntries} M3U entries so far...`);
                 logMemory();
             }
         }
 
-        console.log(`[Sync] M3U Parsed: ${totalChannels} channels, ${allGroups.size} groups`);
-        logMemory();
-
-        // Purge stale items after all batches are complete
-        if (allSyncedIds.size > 0) {
-            await this.purgeStaleItems(source.id, 'live', allSyncedIds);
+        const seriesItems = Array.from(seriesMap.values());
+        if (seriesItems.length > 0) {
+            const batchIds = await this.saveStreams(source.id, 'series', seriesItems, { skipPurge: true });
+            batchIds.forEach(id => seriesSyncedIds.add(id));
         }
 
-        // Save Categories (Groups) at the end
-        const categories = Array.from(allGroups).map(name => ({
+        console.log(`[Sync] M3U Parsed: ${totalEntries} entries (${totalLive} live, ${totalMovies} movies, ${seriesItems.length} series, ${totalEpisodes} episodes)`);
+        logMemory();
+
+        if (liveSyncedIds.size > 0) await this.purgeStaleItems(source.id, 'live', liveSyncedIds);
+        else this.purgeAllItemsByType(source.id, 'live');
+
+        if (movieSyncedIds.size > 0) await this.purgeStaleItems(source.id, 'movie', movieSyncedIds);
+        else this.purgeAllItemsByType(source.id, 'movie');
+
+        if (seriesSyncedIds.size > 0) await this.purgeStaleItems(source.id, 'series', seriesSyncedIds);
+        else this.purgeAllItemsByType(source.id, 'series');
+
+        if (episodeSyncedIds.size > 0) await this.purgeStaleItems(source.id, 'episode', episodeSyncedIds);
+        else this.purgeAllItemsByType(source.id, 'episode');
+
+        const liveCategories = Array.from(liveGroups).map(name => ({
             category_id: name,
             category_name: name,
             parent_id: null
         }));
+        const movieCategories = Array.from(movieGroups).map(name => ({
+            category_id: makeCategoryId('movie', name),
+            category_name: name,
+            parent_id: null
+        }));
+        const seriesCategories = Array.from(seriesGroups).map(name => ({
+            category_id: makeCategoryId('series', name),
+            category_name: name,
+            parent_id: null
+        }));
 
-        await this.saveCategories(source.id, 'live', categories);
+        await this.saveCategories(source.id, 'live', liveCategories);
+        await this.saveCategories(source.id, 'movie', movieCategories);
+        await this.saveCategories(source.id, 'series', seriesCategories);
         console.log(`[Sync] M3U sync complete for ${source.name}`);
     }
 

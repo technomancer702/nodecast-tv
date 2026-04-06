@@ -134,10 +134,10 @@ const API = {
                 return API.request('GET', `/proxy/xtream/${sourceId}/series${query}`);
             },
             seriesInfo: (sourceId, seriesId) =>
-                API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`),
+                API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${encodeURIComponent(seriesId)}`),
             shortEpg: (sourceId, streamId) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}`),
             getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8') =>
-                API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?container=${container}`)
+                API.request('GET', `/proxy/xtream/${sourceId}/stream/${encodeURIComponent(streamId)}/${type}?container=${encodeURIComponent(container)}`)
         },
 
         // EPG
