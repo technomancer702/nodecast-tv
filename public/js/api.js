@@ -37,11 +37,7 @@ const API = {
 
         if (!response.ok) {
             // If unauthorized, redirect to login
-            if (response.status === 401) {
-                localStorage.removeItem('authToken');
-                window.location.href = '/login.html';
-                return;
-            }
+            // Auth disabled - ignore 401s
             throw new Error(result.error || `Server responded with ${response.status}`);
         }
 

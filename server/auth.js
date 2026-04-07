@@ -228,15 +228,17 @@ function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
 /**
  * Middleware: Require authentication using Passport JWT
  */
-const requireAuth = passport.authenticate('jwt', { session: false });
+// Auth disabled - inject a default admin user on every request
+const requireAuth = (req, res, next) => {
+    req.user = { id: 1, username: 'admin', role: 'admin' };
+    next();
+};
 
 /**
  * Middleware: Require admin role
  */
 function requireAdmin(req, res, next) {
-    if (!req.user || req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Forbidden - Admin access required' });
-    }
+    req.user = req.user || { id: 1, username: 'admin', role: 'admin' };
     next();
 }
 

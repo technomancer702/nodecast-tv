@@ -10,7 +10,8 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const { spawn } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
+let ffmpegPath = null;
+try { ffmpegPath = require('ffmpeg-static'); } catch (e) { console.warn('ffmpeg-static not available'); }
 const { Readable } = require('stream');
 
 // Default cache max age in hours

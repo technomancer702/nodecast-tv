@@ -198,7 +198,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
     console.log(`NodeCast TV server running on http://localhost:${PORT}`);
 
     // Load plugins

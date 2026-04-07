@@ -165,44 +165,8 @@ class App {
     }
 
     async checkAuth() {
-        const token = localStorage.getItem('authToken');
-
-        if (!token) {
-            // No token, redirect to login (replace to avoid back button issues)
-            window.location.replace('/login.html');
-            return;
-        }
-
-        try {
-            // Verify token with server
-            const response = await fetch('/api/auth/me', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error('Invalid token');
-            }
-
-            this.currentUser = await response.json();
-
-            // Hide settings for viewers
-            if (this.currentUser.role === 'viewer') {
-                const settingsLink = document.querySelector('.nav-link[data-page="settings"]');
-                if (settingsLink) {
-                    settingsLink.style.display = 'none';
-                }
-            }
-
-            // Add logout button to navbar
-            this.addLogoutButton();
-
-        } catch (err) {
-            console.error('Authentication error:', err);
-            localStorage.removeItem('authToken');
-            window.location.replace('/login.html');
-        }
+        // Auth disabled - use a default admin user
+        this.currentUser = { id: 1, username: 'admin', role: 'admin' };
     }
 
     addLogoutButton() {
