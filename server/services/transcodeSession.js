@@ -198,9 +198,11 @@ class TranscodeSession extends EventEmitter {
             '-analyzeduration', '5000000',
             '-fflags', '+genpts+discardcorrupt',
             '-err_detect', 'ignore_err',
+            '-http_persistent', '0',
             '-reconnect', '1',
             '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '3'
+            '-reconnect_on_http_error', '4xx,5xx',
+            '-reconnect_delay_max', '10'
         );
 
         args.push('-i', this.url);
@@ -390,11 +392,20 @@ class TranscodeSession extends EventEmitter {
     buildScaleFilter(encoder, height) {
         const useUpscale = this.options.upscaleEnabled;
         const upscaleMethod = this.options.upscaleMethod || 'hardware';
+        const sourceHeight = this.options.videoHeight | 0;
 
-        // Log upscaling status
+        const effectiveHeight = useUpscale
+            ? height
+            : (sourceHeight > 0 ? Math.min(height, sourceHeight) : height);
+
+        // Log upscaling / passthrough decision
         if (useUpscale) {
-            console.log(`[TranscodeSession ${this.id}] Upscaling: ${upscaleMethod} method to ${height}p`);
+            console.log(`[TranscodeSession ${this.id}] Upscaling: ${upscaleMethod} method to ${effectiveHeight}p`);
+        } else if (sourceHeight > 0 && sourceHeight <= height) {
+            console.log(`[TranscodeSession ${this.id}] Source ${sourceHeight}p is within cap ${height}p, passing through`);
         }
+
+        const h = effectiveHeight;
 
         // Hardware scaling filters (for both upscale and downscale)
         if (upscaleMethod === 'hardware' || !useUpscale) {
@@ -402,22 +413,22 @@ class TranscodeSession extends EventEmitter {
                 case 'nvenc':
                     // NVIDIA CUDA scaling with Lanczos
                     // Force nv12 (8-bit) output to handle 10-bit inputs (fixes "10 bit encode not supported")
-                    return `scale_cuda=-2:${height}:interp_algo=lanczos:format=nv12`;
+                    return `scale_cuda=-2:${h}:interp_algo=lanczos:format=nv12`;
                 case 'vaapi':
-                    return `scale_vaapi=w=-2:h=${height}:format=nv12`;
+                    return `scale_vaapi=w=-2:h=${h}:format=nv12`;
                 case 'qsv':
-                    return `scale_qsv=w=-2:h=${height}:format=nv12`;
+                    return `scale_qsv=w=-2:h=${h}:format=nv12`;
                 case 'amf':
                     // AMF uses CPU decode, so use software scale
-                    return useUpscale ? `scale=-2:${height}:flags=lanczos` : `scale=-2:${height}`;
+                    return useUpscale ? `scale=-2:${h}:flags=lanczos` : `scale=-2:${h}`;
                 case 'software':
                 default:
-                    return useUpscale ? `scale=-2:${height}:flags=lanczos` : `scale=-2:${height}`;
+                    return useUpscale ? `scale=-2:${h}:flags=lanczos` : `scale=-2:${h}`;
             }
         }
 
         // Software Lanczos scaling (high quality, slower)
-        return `scale=-2:${height}:flags=lanczos`;
+        return `scale=-2:${h}:flags=lanczos`;
     }
 
     /**

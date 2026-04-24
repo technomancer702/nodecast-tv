@@ -460,7 +460,8 @@ class WatchPage {
                         seekOffset: this.resumeTime, // Ensure seekOffset is passed
                         videoCodec: info.video,
                         audioCodec: info.audio,
-                        audioChannels: info.audioChannels
+                        audioChannels: info.audioChannels,
+                        videoHeight: info.height
                     });
                     this.playHls(playlistUrl);
                     this.setVolumeFromStorage();

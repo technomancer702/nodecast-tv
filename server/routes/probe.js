@@ -33,6 +33,11 @@ function probeStream(url, ffprobePath, userAgent = null, timeout = 15000) {
         const args = [
             '-v', 'error',
             '-user_agent', userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            '-http_persistent', '0',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_on_http_error', '4xx,5xx',
+            '-reconnect_delay_max', '10',
             '-print_format', 'json',
             '-show_streams',
             '-show_format',
@@ -186,7 +191,7 @@ router.get('/', async (req, res) => {
         console.error('[Probe] Failed:', err.message);
 
         // On error, assume transcode needed to be safe
-        res.json({
+        const fallback = {
             video: 'unknown',
             audio: 'unknown',
             container: 'unknown',
@@ -194,7 +199,11 @@ router.get('/', async (req, res) => {
             needsRemux: false,
             needsTranscode: true,
             error: err.message
-        });
+        };
+
+        probeCache.set(cacheKey, { result: fallback, timestamp: Date.now() - (CACHE_TTL - 30000) });
+
+        res.json(fallback);
     }
 });
 

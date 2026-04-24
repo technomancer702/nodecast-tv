@@ -920,7 +920,8 @@ class VideoPlayer {
                             videoMode,
                             videoCodec: info.video,
                             audioCodec: info.audio,
-                            audioChannels: info.audioChannels
+                            audioChannels: info.audioChannels,
+                            videoHeight: info.height
                         });
                         this.currentUrl = playlistUrl; // Update currentUrl for HLS reload
 
