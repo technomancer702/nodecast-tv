@@ -33,7 +33,7 @@ async function detectNvidia() {
         // Query GPU info via nvidia-smi
         const result = execSync(
             'nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader',
-            { timeout: 5000, encoding: 'utf-8', windowsHide: true }
+            { timeout: 5000, encoding: 'utf-8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }
         );
 
         const lines = result.trim().split('\n');
@@ -127,7 +127,7 @@ async function detectQuickSync() {
             // Windows: Check via WMIC
             const result = execSync(
                 'wmic path win32_VideoController get name',
-                { timeout: 5000, encoding: 'utf-8', windowsHide: true }
+                { timeout: 5000, encoding: 'utf-8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }
             );
             hasIntelGpu = result.toLowerCase().includes('intel');
         } else if (os.platform() === 'linux') {
@@ -175,7 +175,7 @@ async function detectAMF() {
         // Windows: Check via WMIC for AMD/Radeon
         const result = execSync(
             'wmic path win32_VideoController get name',
-            { timeout: 5000, encoding: 'utf-8', windowsHide: true }
+            { timeout: 5000, encoding: 'utf-8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }
         );
 
         const lowerResult = result.toLowerCase();

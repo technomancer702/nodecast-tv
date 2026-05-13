@@ -871,23 +871,28 @@ router.get('/stream', async (req, res) => {
                 return res.send(manifest);
             }
 
-            // Binary content (Video Segment or Key): Collect and send
+            // Binary content (Video Segment, Movie, or Key): Stream it instead of buffering to RAM
             console.log(`[Proxy] Serving binary content (${contentType})`);
             res.set('Content-Type', contentType || 'application/octet-stream');
 
-            // For small files (like encryption keys), collect all data and send at once
-            // This ensures proper Content-Length and response completion
-            const chunks = [firstChunk];
-            let result = await iterator.next();
-            while (!result.done) {
-                chunks.push(Buffer.from(result.value));
-                result = await iterator.next();
-            }
-            const fullContent = Buffer.concat(chunks);
+            // Write the first chunk we already peeked at
+            res.write(firstChunk);
 
-            // Set Content-Length for proper client handling
-            res.set('Content-Length', fullContent.length);
-            res.send(fullContent);
+            // Stream the rest directly from the iterator
+            const stream = Readable.from(iterator);
+            stream.pipe(res);
+
+            // Wait for streaming to finish before returning
+            await new Promise((resolve, reject) => {
+                stream.on('end', resolve);
+                stream.on('error', reject);
+                res.on('close', () => {
+                    // Client disconnected early (e.g. paused or seeking)
+                    stream.destroy();
+                    resolve();
+                });
+            });
+            
             return; // Success - exit the retry loop
 
         } catch (err) {

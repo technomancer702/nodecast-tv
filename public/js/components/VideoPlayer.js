@@ -1162,9 +1162,27 @@ class VideoPlayer {
             } else {
                 // Priority 3: Try direct playback for non-HLS streams
                 this.updateTranscodeStatus('direct', 'Direct Play');
+                
+                const handleVideoError = () => {
+                    console.log('[Player] Direct Play failed (CORS or format issue). Trying proxy...');
+                    if (!this.isUsingProxy) {
+                        this.isUsingProxy = true;
+                        this.updateTranscodeStatus('proxy', 'Direct Proxy');
+                        this.video.src = this.getProxiedUrl(streamUrl);
+                        this.video.play().catch(err => {
+                            if (err.name !== 'AbortError') console.error('[Player] Proxy play failed:', err);
+                        });
+                    }
+                };
+                
+                this.video.addEventListener('error', handleVideoError, { once: true });
+                
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
+                    if (e.name !== 'AbortError') {
+                        console.log('[Player] Autoplay prevented or playback failed:', e);
+                        if (!this.isUsingProxy) handleVideoError();
+                    }
                 });
             }
 
