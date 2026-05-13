@@ -90,6 +90,37 @@ class SettingsPage {
             });
         }
 
+        // Clear History Button
+        const clearHistoryBtn = document.getElementById('btn-clear-history');
+        if (clearHistoryBtn) {
+            clearHistoryBtn.addEventListener('click', async () => {
+                if (confirm('Are you sure you want to clear all your watch history and recent channels? This cannot be undone.')) {
+                    try {
+                        // Clear backend history (Continue Watching)
+                        const response = await window.API.request('DELETE', '/history');
+                        if (!response) throw new Error('Failed to clear history');
+
+                        // Clear localStorage Recent Channels
+                        localStorage.removeItem('nodecast_tv_recent_channels');
+                        if (this.app.channelList) {
+                            this.app.channelList.recentChannels = [];
+                            this.app.channelList.render();
+                        }
+
+                        // Clear HomePage continue watching if loaded
+                        if (this.app.pages.home) {
+                            await this.app.pages.home.loadDashboardData();
+                        }
+
+                        alert('Watch history cleared successfully.');
+                    } catch (err) {
+                        console.error('Error clearing history:', err);
+                        alert('Error clearing history: ' + err.message);
+                    }
+                }
+            });
+        }
+
         // Update last refreshed display
         this.updateEpgLastRefreshed();
     }
