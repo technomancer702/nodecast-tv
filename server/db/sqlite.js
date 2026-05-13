@@ -98,6 +98,8 @@ function initSchema() {
             last_sync INTEGER NOT NULL,
             status TEXT, -- 'success', 'error', 'syncing'
             error TEXT,
+            provider_count INTEGER DEFAULT 0,
+            database_count INTEGER DEFAULT 0,
             PRIMARY KEY (source_id, type)
         );
     `);
@@ -140,7 +142,15 @@ function initSchema() {
         db.exec(`ALTER TABLE watch_history ADD COLUMN source_id INTEGER`);
         console.log('[SQLite] Added source_id column to watch_history');
     } catch (e) {
-        // Column already exists, ignore
+        // Column already exists
+    }
+
+    // Migration: Add stats columns to sync_status if missing
+    try {
+        db.exec(`ALTER TABLE sync_status ADD COLUMN provider_count INTEGER DEFAULT 0`);
+        db.exec(`ALTER TABLE sync_status ADD COLUMN database_count INTEGER DEFAULT 0`);
+    } catch (e) {
+        // Columns already exist
     }
 
     console.log('[SQLite] Schema initialized');

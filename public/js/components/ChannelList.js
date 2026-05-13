@@ -148,9 +148,22 @@ class ChannelList {
         let searchTimeout;
         this.searchInput.addEventListener('input', () => {
             clearTimeout(searchTimeout);
+            const term = this.searchInput.value.trim();
+
             searchTimeout = setTimeout(() => {
-                this.render();
-            }, 300);
+                // If search is cleared, reload all channels
+                if (term.length === 0) {
+                    this.loadChannels();
+                    return;
+                }
+
+                // If the playlist is large, use server-side search
+                if (this.channels.length > 5000 || term.length >= 3) {
+                    this.searchChannels(term);
+                } else {
+                    this.render();
+                }
+            }, 500);
         });
 
         // Source filter handler
@@ -365,29 +378,23 @@ class ChannelList {
             this.saveCollapsedState();
         }
 
-        // Build rendered channel list for navigation (matches visual order)
-        this.renderedChannels = [];
+        // Build rendered channel index for navigation (matches visual order)
+        this.renderedChannelIndices = [];
         this.sortedGroups.forEach(groupName => {
             const channels = this.groupedChannels[groupName];
             const isFavoritesGroup = groupName === 'Favorites';
 
-            const visibleChannels = channels.filter(channel => {
-                if (isFavoritesGroup) return true;
+            channels.forEach((channel, index) => {
                 const rawChannelId = channel.streamId || channel.id;
-                const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
-                return !channelHidden || this.showHidden;
-            });
-
-            // Assign unique render IDs for linear navigation
-            visibleChannels.forEach(ch => {
-                // We clone the object for the rendered list to attach the unique ID
-                // ensuring no side effects on the main channel object
-                const renderedCh = {
-                    ...ch,
-                    _renderId: `rid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                    _renderGroup: groupName // Track visual group for navigation
-                };
-                this.renderedChannels.push(renderedCh);
+                const isHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
+                
+                if (!isHidden || this.showHidden) {
+                    // Just store a reference to the group and index to save memory
+                    this.renderedChannelIndices.push({
+                        group: groupName,
+                        index: index
+                    });
+                }
             });
         });
 
@@ -492,12 +499,10 @@ class ChannelList {
                 const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
 
                 const isActive = this.currentChannel?.id === channel.id;
-                // Check if this specific instance is the "active" one for navigation purposes
-                const isRenderActive = this.currentRenderId && this.renderedChannels[renderIndex]?._renderId === this.currentRenderId;
-
+                
+                // navigation logic
                 const isFavorite = this.isFavorite(channel.sourceId, channel.id);
-                const renderId = this.renderedChannels[renderIndex]?._renderId || '';
-                const renderGroup = this.renderedChannels[renderIndex]?._renderGroup || groupName;
+                const renderId = `rid_${channel.sourceId}_${channel.id}`;
                 renderIndex++;
 
                 html += `
@@ -600,18 +605,17 @@ class ChannelList {
         });
 
         let html = '';
-        for (const channel of visibleChannels) {
+        for (let i = 0; i < visibleChannels.length; i++) {
+            const channel = visibleChannels[i];
+            
+            // Register in global tracker
+            this.renderedChannelIndices.push({ group: groupName, index: i });
+            
             const rawChannelId = channel.streamId || channel.id;
             const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
             const isActive = this.currentChannel?.id === channel.id;
             const isFavorite = this.isFavorite(channel.sourceId, channel.id);
-
-            // Find the matching rendered channel to get its unique IDs
-            const renderedChannel = this.renderedChannels.find(rc =>
-                rc.id === channel.id && rc.sourceId === channel.sourceId && rc._renderGroup === groupName
-            );
-            const renderId = renderedChannel?._renderId || '';
-            const renderGroup = renderedChannel?._renderGroup || groupName;
+            const renderId = `rid_${channel.sourceId}_${channel.id}`;
 
             html += `
           <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''}" 
@@ -621,7 +625,7 @@ class ChannelList {
                data-stream-id="${channel.streamId || ''}"
                data-url="${channel.url || ''}"
                data-render-id="${renderId}"
-               data-render-group="${renderGroup}">
+               data-render-group="${groupName}">
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
@@ -1093,7 +1097,7 @@ class ChannelList {
 
         // If not found in DOM, it might be in a future batch not yet rendered
         // Render batches until we find it or run out
-        if (!activeItem && this.renderedChannels.length > 0) {
+        if (!activeItem) {
             let safety = 0;
             while (!activeItem && this.currentBatch * this.batchSize < this.sortedGroups.length && safety < 20) {
                 this.renderNextBatch();
@@ -1348,90 +1352,77 @@ class ChannelList {
     }
 
     /**
+     * Helper to navigate by render ID
+     */
+    navigate(renderId) {
+        const item = this.container.querySelector(`[data-render-id="${renderId}"]`);
+        if (item) {
+            this.selectChannel(item.dataset);
+        }
+    }
+
+    /**
+     * Retrieve a virtualized channel object
+     */
+    getRenderedChannel(index) {
+        const item = this.renderedChannelIndices[index];
+        if (!item) return null;
+        const group = this.groupedChannels[item.group];
+        if (!group) return null;
+        const channel = group[item.index];
+        if (!channel) return null;
+        
+        return {
+            ...channel,
+            _renderId: `rid_${channel.sourceId}_${channel.id}`,
+            _renderGroup: item.group,
+            _globalIndex: index
+        };
+    }
+
+    findRenderedIndexByRenderId(renderId) {
+        if (!renderId) return -1;
+        return this.renderedChannelIndices.findIndex(item => {
+            const ch = this.groupedChannels[item.group][item.index];
+            return `rid_${ch.sourceId}_${ch.id}` === renderId;
+        });
+    }
+
+    findRenderedIndexByChannelId(sourceId, channelId) {
+        return this.renderedChannelIndices.findIndex(item => {
+            const ch = this.groupedChannels[item.group][item.index];
+            return ch.sourceId === sourceId && ch.id === channelId;
+        });
+    }
+
+    /**
      * Select next channel in the current list
      */
     selectNextChannel() {
-        if (!this.currentChannel || !this.renderedChannels || this.renderedChannels.length === 0) return;
+        if (!this.currentChannel || this.renderedChannelIndices.length === 0) return;
 
-        let currentIndex = -1;
+        const currentIndex = this.currentRenderId ? this.findRenderedIndexByRenderId(this.currentRenderId) : -1;
+        const nextIndex = (currentIndex + 1) % this.renderedChannelIndices.length;
 
-        // Try to find by render ID first (strict visual order)
-        if (this.currentRenderId) {
-            currentIndex = this.renderedChannels.findIndex(c => c._renderId === this.currentRenderId);
+        if (nextIndex < this.renderedChannelIndices.length) {
+            const nextChannel = this.getRenderedChannel(nextIndex);
+            this.navigate(nextChannel._renderId);
         }
-
-        // Fallback: Find matching channel ID, prioritizing same render group
-        if (currentIndex === -1) {
-            // First try to find in same group (for Favorites containing duplicates)
-            if (this.currentRenderGroup) {
-                currentIndex = this.renderedChannels.findIndex(c =>
-                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId && c._renderGroup === this.currentRenderGroup
-                );
-            }
-            // Final fallback: any matching channel
-            if (currentIndex === -1) {
-                currentIndex = this.renderedChannels.findIndex(c =>
-                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
-                );
-            }
-        }
-
-        if (currentIndex === -1) return;
-
-        const nextIndex = (currentIndex + 1) % this.renderedChannels.length;
-        const nextChannel = this.renderedChannels[nextIndex];
-
-        this.selectChannel({
-            channelId: nextChannel.id,
-            sourceId: nextChannel.sourceId,
-            sourceType: nextChannel.sourceType,
-            streamId: nextChannel.streamId,
-            url: nextChannel.url,
-            renderId: nextChannel._renderId // Pass the unique render ID
-        });
     }
 
     /**
      * Select previous channel in the current list
      */
     selectPrevChannel() {
-        if (!this.currentChannel || !this.renderedChannels || this.renderedChannels.length === 0) return;
+        if (!this.currentChannel || this.renderedChannelIndices.length === 0) return;
 
-        let currentIndex = -1;
+        const currentIndex = this.currentRenderId ? this.findRenderedIndexByRenderId(this.currentRenderId) : -1;
+        const prevIndex = (currentIndex - 1 + this.renderedChannelIndices.length) % this.renderedChannelIndices.length;
 
-        if (this.currentRenderId) {
-            currentIndex = this.renderedChannels.findIndex(c => c._renderId === this.currentRenderId);
+        if (prevIndex >= 0) {
+            const prevChannel = this.getRenderedChannel(prevIndex);
+            this.navigate(prevChannel._renderId);
         }
-
-        // Fallback: Find matching channel ID, prioritizing same render group
-        if (currentIndex === -1) {
-            // First try to find in same group (for Favorites containing duplicates)
-            if (this.currentRenderGroup) {
-                currentIndex = this.renderedChannels.findIndex(c =>
-                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId && c._renderGroup === this.currentRenderGroup
-                );
-            }
-            // Final fallback: any matching channel
-            if (currentIndex === -1) {
-                currentIndex = this.renderedChannels.findIndex(c =>
-                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
-                );
-            }
-        }
-
-        if (currentIndex === -1) return;
-
-        const prevIndex = (currentIndex - 1 + this.renderedChannels.length) % this.renderedChannels.length;
-        const prevChannel = this.renderedChannels[prevIndex];
-
-        this.selectChannel({
-            channelId: prevChannel.id,
-            sourceId: prevChannel.sourceId,
-            sourceType: prevChannel.sourceType,
-            streamId: prevChannel.streamId,
-            url: prevChannel.url,
-            renderId: prevChannel._renderId
-        });
     }
 
     /**
@@ -1456,6 +1447,57 @@ class ChannelList {
             const groupHidden = this.isHidden('group', ch.sourceId, ch.groupTitle);
             return !channelHidden && !groupHidden;
         });
+    }
+
+    async searchChannels(term) {
+        if (!term) {
+            // Reload all channels if search cleared
+            this.loadAllChannels();
+            return;
+        }
+
+        this.showLoading();
+        try {
+            this.channels = [];
+            // Use enabled sources
+            const enabledSources = this.sources.length > 0 ? this.sources : (await API.sources.getAll()).filter(s => s.enabled);
+
+            for (const source of enabledSources) {
+                try {
+                    let results = [];
+                    // Use Xtream proxy for search (it handles both Xtream and M3U now)
+                    results = await API.proxy.xtream.liveStreams(source.id, null, { search: term });
+                    
+                    if (results && Array.isArray(results)) {
+                        const mapped = results.map(ch => ({
+                            ...ch,
+                            id: ch.stream_id,
+                            sourceId: source.id,
+                            sourceType: source.type,
+                            groupTitle: ch.category_id || 'Search Results'
+                        }));
+                        this.channels = this.channels.concat(mapped);
+                    }
+                } catch (err) {
+                    console.warn(`Search failed for source ${source.id}:`, err);
+                }
+            }
+            this.render();
+        } catch (err) {
+            console.error('Search error:', err);
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    showLoading() {
+        const loader = document.querySelector('.sidebar-loader') || this.loader;
+        if (loader) loader.style.display = 'block';
+    }
+
+    hideLoading() {
+        const loader = document.querySelector('.sidebar-loader') || this.loader;
+        if (loader) loader.style.display = 'none';
     }
 }
 

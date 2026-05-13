@@ -62,8 +62,8 @@ class XtreamApi {
     /**
      * Get live streams, optionally filtered by category
      */
-    async getLiveStreams(categoryId = null) {
-        return this.request('get_live_streams', { category_id: categoryId });
+    async getLiveStreams(categoryId = null, search = null) {
+        return this.request('get_live_streams', { category_id: categoryId, search });
     }
 
     /**
@@ -76,8 +76,8 @@ class XtreamApi {
     /**
      * Get VOD streams, optionally filtered by category
      */
-    async getVodStreams(categoryId = null) {
-        return this.request('get_vod_streams', { category_id: categoryId });
+    async getVodStreams(categoryId = null, search = null) {
+        return this.request('get_vod_streams', { category_id: categoryId, search });
     }
 
     /**
@@ -97,8 +97,8 @@ class XtreamApi {
     /**
      * Get series, optionally filtered by category
      */
-    async getSeries(categoryId = null) {
-        return this.request('get_series', { category_id: categoryId });
+    async getSeries(categoryId = null, search = null) {
+        return this.request('get_series', { category_id: categoryId, search });
     }
 
     /**

@@ -171,9 +171,7 @@ router.get('/', async (req, res) => {
     const settings = await db.settings.get();
     const userAgent = db.getUserAgent(settings);
 
-    console.log(`[Transcode] Starting transcoding for: ${url}`);
-    console.log(`[Transcode] Using User-Agent: ${settings.userAgentPreset}`);
-    console.log(`[Transcode] Using binary: ${ffmpegPath}`);
+
 
     // FFmpeg arguments for transcoding
     // Optimized for VOD content with incompatible audio (Dolby/AC3/EAC3)
@@ -220,7 +218,6 @@ router.get('/', async (req, res) => {
         '-' // Output to stdout
     ];
 
-    console.log(`[Transcode] Full command: ${ffmpegPath} ${args.join(' ')}`);
 
     let ffmpeg;
     try {
@@ -240,16 +237,13 @@ router.get('/', async (req, res) => {
     // Pipe stdout to response
     ffmpeg.stdout.pipe(res);
 
-    // Log stderr (useful for debugging transcoding failures)
+    // Collect stderr silently (only log errors on exit if needed)
     ffmpeg.stderr.on('data', (data) => {
-        const msg = data.toString();
-        stderrBuffer += msg;
-        console.log(`[FFmpeg] ${msg}`);
+        stderrBuffer += data.toString();
     });
 
     // Cleanup on client disconnect
     req.on('close', () => {
-        console.log('[Transcode] Client disconnected, killing FFmpeg process');
         ffmpeg.kill('SIGKILL');
     });
 

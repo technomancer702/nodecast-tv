@@ -89,7 +89,6 @@ class TranscodeSession extends EventEmitter {
         }
 
         this.status = 'starting';
-        console.log(`[TranscodeSession ${this.id}] Starting session for: ${this.url}`);
 
         // Create session directory
         try {
@@ -103,7 +102,6 @@ class TranscodeSession extends EventEmitter {
         // Build FFmpeg arguments for HLS output
         const args = this.buildFFmpegArgs();
 
-        console.log(`[TranscodeSession ${this.id}] Command: ${this.options.ffmpegPath} ${args.join(' ')}`);
 
         try {
             this.process = spawn(this.options.ffmpegPath, args, {
@@ -113,21 +111,17 @@ class TranscodeSession extends EventEmitter {
 
             this.status = 'running';
 
-            // Handle stdout (should be empty for file output)
-            this.process.stdout.on('data', (data) => {
-                console.log(`[TranscodeSession ${this.id}] stdout: ${data}`);
-            });
 
-            // Handle stderr (FFmpeg progress/errors)
+            // Handle stderr: only log lines that look like actual errors
             let stderrBuffer = '';
             this.process.stderr.on('data', (data) => {
                 stderrBuffer += data.toString();
-                // Log periodically to avoid spam
                 const lines = stderrBuffer.split('\n');
                 if (lines.length > 1) {
                     lines.slice(0, -1).forEach(line => {
-                        if (line.trim()) {
-                            console.log(`[FFmpeg ${this.id}] ${line}`);
+                        const trimmed = line.trim();
+                        if (trimmed && /(error|failed|invalid|cannot|unable)/i.test(trimmed)) {
+                            console.error(`[FFmpeg ${this.id}] ${trimmed}`);
                         }
                     });
                     stderrBuffer = lines[lines.length - 1];
@@ -137,9 +131,8 @@ class TranscodeSession extends EventEmitter {
             // Handle process exit
             this.process.on('exit', (code) => {
                 if (code === 0 || code === null) {
-                    console.log(`[TranscodeSession ${this.id}] FFmpeg completed successfully`);
                     this.status = 'stopped';
-                } else if (code !== 255) { // 255 is often from SIGKILL
+                } else if (code !== 255) {
                     console.error(`[TranscodeSession ${this.id}] FFmpeg exited with code ${code}`);
                     this.status = 'error';
                     this.error = `FFmpeg exited with code ${code}`;
@@ -178,7 +171,6 @@ class TranscodeSession extends EventEmitter {
         if (encoder === 'auto') {
             const hwCaps = hwDetect.getCapabilities();
             encoder = hwCaps?.recommended || 'software';
-            console.log(`[TranscodeSession ${this.id}] Auto encoder resolved to: ${encoder}`);
         }
 
         const args = [
@@ -248,19 +240,12 @@ class TranscodeSession extends EventEmitter {
         };
 
         if (audioMixPreset === 'passthrough') {
-            // Passthrough: Always copy audio, no processing
-            console.log(`[TranscodeSession ${this.id}] Audio: Passthrough (copy)`);
             args.push('-c:a', 'copy');
         } else if (audioMixPreset === 'auto' && isStereoAac) {
-            // Auto + Stereo AAC source: Smart copy
-            console.log(`[TranscodeSession ${this.id}] Audio: Auto (Smart Copy) - Source is Stereo AAC`);
             args.push('-c:a', 'copy');
         } else {
-            // Transcode to AAC with selected mix preset (default to ITU for 'auto')
             const mixPreset = (audioMixPreset === 'auto') ? 'itu' : audioMixPreset;
             const panFilter = AUDIO_MIX_FILTERS[mixPreset] || AUDIO_MIX_FILTERS.itu;
-
-            console.log(`[TranscodeSession ${this.id}] Audio: ${mixPreset.toUpperCase()} mix (${audioCodec} ${audioChannels}ch -> Stereo AAC)`);
             args.push(
                 '-c:a', 'aac',
                 '-ar', '48000',
@@ -374,7 +359,6 @@ class TranscodeSession extends EventEmitter {
         // When upscaling is enabled, use the upscale target resolution
         if (this.options.upscaleEnabled) {
             const target = resolutionMap[this.options.upscaleTarget] || 1080;
-            console.log(`[TranscodeSession ${this.id}] Upscale target height: ${target}p`);
             return target;
         }
 
@@ -391,9 +375,8 @@ class TranscodeSession extends EventEmitter {
         const useUpscale = this.options.upscaleEnabled;
         const upscaleMethod = this.options.upscaleMethod || 'hardware';
 
-        // Log upscaling status
         if (useUpscale) {
-            console.log(`[TranscodeSession ${this.id}] Upscaling: ${upscaleMethod} method to ${height}p`);
+            // upscaling enabled
         }
 
         // Hardware scaling filters (for both upscale and downscale)
@@ -516,9 +499,7 @@ class TranscodeSession extends EventEmitter {
      */
     stop() {
         if (this.process) {
-            console.log(`[TranscodeSession ${this.id}] Stopping FFmpeg process`);
             this.process.kill('SIGTERM');
-            // Force kill after 2 seconds if still running
             setTimeout(() => {
                 if (this.process) {
                     this.process.kill('SIGKILL');

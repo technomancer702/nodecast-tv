@@ -32,8 +32,40 @@ function getCategoriesFromDb(sourceId, type, includeHidden = false) {
     return cats;
 }
 
+
+// Helper for bilingual search (AR <-> EN)
+async function getTranslatedSearch(text) {
+    if (!text || text.length < 2) return null;
+    
+    // Detect if contains Arabic characters
+    const isArabic = /[\u0600-\u06FF]/.test(text);
+    const targetLang = isArabic ? 'en' : 'ar';
+    const sourceLang = isArabic ? 'ar' : 'en';
+
+    console.log(`[Proxy] Translating search: "${text}" (${sourceLang} -> ${targetLang})`);
+
+    try {
+        // Use a lightweight public translation API (no API key needed for basic usage)
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data && data[0] && data[0][0] && data[0][0][0]) {
+            const translated = data[0][0][0];
+            if (translated && translated.toLowerCase() !== text.toLowerCase()) {
+                console.log(`[Proxy] Translation success: "${text}" -> "${translated}"`);
+                return translated;
+            }
+        }
+        console.log(`[Proxy] No translation found or identical for: "${text}"`);
+    } catch (err) {
+        console.warn('[Proxy] Translation failed:', err.message);
+    }
+    return null;
+}
+
 // Helper to get formatted streams from DB
-function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = false) {
+async function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = false, search = null) {
     const db = getDb();
     let query = `
         SELECT item_id, name, stream_icon, added_at, rating, container_extension, year, category_id, data
@@ -50,28 +82,91 @@ function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = fal
         params.push(categoryId);
     }
 
+    if (search) {
+        const translated = await getTranslatedSearch(search);
+        
+        // Helper to build word-based LIKE clauses
+        const buildFuzzySearch = (term) => {
+            if (!term) return { sql: '', params: [] };
+            
+            // For Arabic, we want to be flexible with 'AL-', 'h/t', and 'alif'
+            // But we shouldn't require ALL variations (which was the bug)
+            const words = term.split(/\s+/).filter(w => w.length > 1);
+            
+            if (words.length === 0) {
+                return { sql: 'name LIKE ?', params: [`%${term}%`] };
+            }
+            
+            const clauses = [];
+            const sqlParams = [];
+            
+            words.forEach(word => {
+                let cleanWord = word;
+                
+                // Detect if it's an Arabic word
+                const isArabic = /[\u0600-\u06FF]/.test(word);
+                
+                if (isArabic) {
+                    // Remove 'AL-' prefix
+                    if (cleanWord.startsWith('ال')) {
+                        cleanWord = cleanWord.substring(2);
+                    }
+                    // Remove common Arabic suffixes to get to the root
+                    // Order matters: check multi-character suffixes first
+                    if (cleanWord.endsWith('اً')) {
+                        cleanWord = cleanWord.substring(0, cleanWord.length - 2);
+                    } else if (cleanWord.endsWith('ه') || cleanWord.endsWith('ة') || cleanWord.endsWith('ا')) {
+                        cleanWord = cleanWord.substring(0, cleanWord.length - 1);
+                    }
+                }
+                
+                // If it's a short word after stripping, keep original to avoid too many matches
+                const finalWord = cleanWord.length > 1 ? cleanWord : word;
+                
+                clauses.push('name LIKE ?');
+                sqlParams.push(`%${finalWord}%`);
+            });
+            
+            return {
+                sql: `(${clauses.join(' AND ')})`,
+                params: sqlParams
+            };
+        };
+
+        const originalSearch = buildFuzzySearch(search);
+        const translatedSearch = buildFuzzySearch(translated);
+
+        if (translated && translatedSearch.sql) {
+            query += ` AND (${originalSearch.sql} OR ${translatedSearch.sql} OR name LIKE ?)`;
+            params.push(...originalSearch.params, ...translatedSearch.params, `%${search}%`);
+        } else {
+            query += ` AND (${originalSearch.sql} OR name LIKE ?)`;
+            params.push(...originalSearch.params, `%${search}%`);
+        }
+        
+        console.log(`[Proxy] Search SQL: ${query}`);
+        console.log(`[Proxy] Search Params: ${JSON.stringify(params)}`);
+    }
+
     // Default sorting
-    // query += ` ORDER BY name ASC`; // Sorting usually handled by client
+    query += ` ORDER BY name ASC`;
 
     const items = db.prepare(query).all(...params);
 
     // Map to Xtream format
     return items.map(item => {
         const data = JSON.parse(item.data || '{}');
-        // Override with our local fields if needed, or just return the mixed object
-        // We should ensure critical fields are present
         return {
             ...data,
-            stream_id: item.item_id, // ensure ID matches what client expects
+            stream_id: item.item_id, 
             series_id: type === 'series' ? item.item_id : undefined,
             name: item.name,
             stream_icon: item.stream_icon,
-            cover: item.stream_icon, // series/vod often use cover
+            cover: item.stream_icon,
             added: item.added_at,
             rating: item.rating,
             container_extension: item.container_extension,
             category_id: item.category_id,
-            // Normalize EPG channel ID: Xtream uses epg_channel_id, M3U uses tvgId
             epg_channel_id: data.epg_channel_id || data.tvgId || null
         };
     });
@@ -118,8 +213,9 @@ router.get('/xtream/:sourceId/live_streams', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
+        const search = req.query.search;
         const includeHidden = req.query.includeHidden === 'true';
-        const streams = getStreamsFromDb(sourceId, 'live', categoryId, includeHidden);
+        const streams = await getStreamsFromDb(sourceId, 'live', categoryId, includeHidden, search);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -145,8 +241,9 @@ router.get('/xtream/:sourceId/vod_streams', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
+        const search = req.query.search;
         const includeHidden = req.query.includeHidden === 'true';
-        const streams = getStreamsFromDb(sourceId, 'movie', categoryId, includeHidden);
+        const streams = await getStreamsFromDb(sourceId, 'movie', categoryId, includeHidden, search);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -172,8 +269,9 @@ router.get('/xtream/:sourceId/series', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
+        const search = req.query.search;
         const includeHidden = req.query.includeHidden === 'true';
-        const streams = getStreamsFromDb(sourceId, 'series', categoryId, includeHidden);
+        const streams = await getStreamsFromDb(sourceId, 'series', categoryId, includeHidden, search);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -195,7 +293,10 @@ router.get('/xtream/:sourceId/series_info', async (req, res) => {
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
         if (cached) return res.json(cached);
 
-        const api = xtreamApi.createFromSource(source);
+        const api = source.type === 'xtream' 
+            ? xtreamApi.createFromSource(source)
+            : require('../services/m3uXtreamAdapter').createFromSourceId(source.id);
+            
         const data = await api.getSeriesInfo(seriesId);
         cache.set('xtream', source.id, cacheKey, data);
         res.json(data);
@@ -217,10 +318,24 @@ router.get('/xtream/:sourceId/vod_info', async (req, res) => {
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
         if (cached) return res.json(cached);
 
-        const api = xtreamApi.createFromSource(source);
-        const data = await api.getVodInfo(vodId);
-        cache.set('xtream', source.id, cacheKey, data);
-        res.json(data);
+        if (source.type === 'xtream') {
+            const api = xtreamApi.createFromSource(source);
+            const data = await api.getVodInfo(vodId);
+            cache.set('xtream', source.id, cacheKey, data);
+            res.json(data);
+        } else {
+            // M3U doesn't have separate VOD info usually, but we can return basic info from DB
+            const db = getDb();
+            const item = db.prepare('SELECT * FROM playlist_items WHERE source_id = ? AND item_id = ?').get(source.id, vodId);
+            res.json({
+                info: {
+                    name: item?.name,
+                    movie_image: item?.stream_icon,
+                    rating: item?.rating,
+                    releasedate: item?.year
+                }
+            });
+        }
     } catch (err) {
         res.status(502).json({ error: 'Upstream error', details: err.message });
     }
@@ -231,8 +346,8 @@ router.get('/xtream/:sourceId/vod_info', async (req, res) => {
 router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
     try {
         const source = await sources.getById(req.params.sourceId);
-        if (!source || source.type !== 'xtream') {
-            return res.status(404).json({ error: 'Xtream source not found' });
+        if (!source) {
+            return res.status(404).json({ error: 'Source not found' });
         }
 
         const streamId = req.params.streamId;
@@ -245,18 +360,26 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
         // Format: http://server:port/series/username/password/streamId.container (for series)
 
         let streamUrl;
-        const baseUrl = source.url.replace(/\/$/, ''); // Remove trailing slash
-
-        if (type === 'live') {
-            streamUrl = `${baseUrl}/live/${source.username}/${source.password}/${streamId}.${container}`;
-        } else if (type === 'movie') {
-            streamUrl = `${baseUrl}/movie/${source.username}/${source.password}/${streamId}.${container}`;
-        } else if (type === 'series') {
-            streamUrl = `${baseUrl}/series/${source.username}/${source.password}/${streamId}.${container}`;
+        
+        if (source.type === 'xtream') {
+            const baseUrl = source.url.replace(/\/$/, ''); // Remove trailing slash
+            if (type === 'live') {
+                streamUrl = `${baseUrl}/live/${source.username}/${source.password}/${streamId}.${container}`;
+            } else if (type === 'movie') {
+                streamUrl = `${baseUrl}/movie/${source.username}/${source.password}/${streamId}.${container}`;
+            } else if (type === 'series') {
+                streamUrl = `${baseUrl}/series/${source.username}/${source.password}/${streamId}.${container}`;
+            } else {
+                return res.status(400).json({ error: 'Invalid stream type' });
+            }
         } else {
-            return res.status(400).json({ error: 'Invalid stream type' });
+            // M3U: get direct URL from DB
+            const db = getDb();
+            const row = db.prepare('SELECT stream_url FROM playlist_items WHERE source_id = ? AND item_id = ?').get(source.id, streamId);
+            streamUrl = row?.stream_url;
         }
 
+        if (!streamUrl) return res.status(404).json({ error: 'Stream not found' });
         res.json({ url: streamUrl });
     } catch (err) {
         console.error('Error getting stream URL:', err);
@@ -394,12 +517,12 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
     try {
         const sourceId = req.params.sourceId;
         const source = await sources.getById(sourceId);
-        if (!source || source.type !== 'xtream') {
-            return res.status(404).json({ error: 'Xtream source not found' });
+        if (!source) {
+            return res.status(404).json({ error: 'Source not found' });
         }
 
         const { action } = req.params;
-        const { category_id, stream_id, vod_id, series_id, limit, refresh, maxAge } = req.query;
+        const { category_id, stream_id, vod_id, series_id, limit, refresh, maxAge, search } = req.query;
         const forceRefresh = refresh === '1';
         const maxAgeHours = parseInt(maxAge) || DEFAULT_MAX_AGE_HOURS;
         const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
@@ -423,23 +546,26 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
         }
 
         // Fetch fresh data
-        const api = xtreamApi.createFromSource(source);
+        const api = source.type === 'xtream' 
+            ? xtreamApi.createFromSource(source)
+            : require('../services/m3uXtreamAdapter').createFromSourceId(source.id);
+            
         let data;
         switch (action) {
             case 'auth':
-                data = await api.authenticate();
+                data = source.type === 'xtream' ? await api.authenticate() : { user_info: { status: 'Active' }, server_info: { url: source.url } };
                 break;
             case 'live_categories':
                 data = await api.getLiveCategories();
                 break;
             case 'live_streams':
-                data = await api.getLiveStreams(category_id);
+                data = await api.getLiveStreams(category_id, search);
                 break;
             case 'vod_categories':
                 data = await api.getVodCategories();
                 break;
             case 'vod_streams':
-                data = await api.getVodStreams(category_id);
+                data = await api.getVodStreams(category_id, search);
                 break;
             case 'vod_info':
                 data = await api.getVodInfo(vod_id);
@@ -448,13 +574,13 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
                 data = await api.getSeriesCategories();
                 break;
             case 'series':
-                data = await api.getSeries(category_id);
+                data = await api.getSeries(category_id, search);
                 break;
             case 'series_info':
                 data = await api.getSeriesInfo(series_id);
                 break;
             case 'short_epg':
-                data = await api.getShortEpg(stream_id, limit);
+                data = source.type === 'xtream' ? await api.getShortEpg(stream_id, limit) : [];
                 break;
             default:
                 return res.status(400).json({ error: 'Unknown action' });
@@ -479,15 +605,20 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
 router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
     try {
         const source = await sources.getById(req.params.sourceId);
-        if (!source || source.type !== 'xtream') {
-            return res.status(404).json({ error: 'Xtream source not found' });
+        if (!source) {
+            return res.status(404).json({ error: 'Source not found' });
         }
 
-        const api = xtreamApi.createFromSource(source);
+        const api = source.type === 'xtream'
+            ? xtreamApi.createFromSource(source)
+            : require('../services/m3uXtreamAdapter').createFromSourceId(source.id);
+            
         const { streamId, type = 'live' } = req.params;
         const { container = 'm3u8' } = req.query;
 
-        const url = api.buildStreamUrl(streamId, type, container);
+        const url = source.type === 'xtream' 
+            ? api.buildStreamUrl(streamId, type, container)
+            : await api.buildStreamUrl(streamId, type, container);
         res.json({ url });
     } catch (err) {
         console.error('Stream URL error:', err);

@@ -150,7 +150,6 @@ router.get('/', async (req, res) => {
 
     if (!ffprobePath) {
         // No ffprobe available - assume needs transcoding to be safe
-        console.log('[Probe] FFprobe not available, assuming transcode needed');
         return res.json({
             video: 'unknown',
             audio: 'unknown',
@@ -164,11 +163,9 @@ router.get('/', async (req, res) => {
     // Check cache
     const cached = probeCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
-        console.log(`[Probe] Cache hit for: ${url.substring(0, 50)}...`);
         return res.json(cached.result);
     }
 
-    console.log(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
 
     try {
         const probeResult = await probeStream(url, ffprobePath, ua);
@@ -177,9 +174,6 @@ router.get('/', async (req, res) => {
         // Cache result
         probeCache.set(cacheKey, { result: analysis, timestamp: Date.now() });
 
-        console.log(`[Probe] Result: video=${analysis.video}, audio=${analysis.audio}, ` +
-            `container=${analysis.container}, compatible=${analysis.compatible}, ` +
-            `needsRemux=${analysis.needsRemux}, needsTranscode=${analysis.needsTranscode}`);
 
         res.json(analysis);
     } catch (err) {

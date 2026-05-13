@@ -145,7 +145,7 @@ class SyncService {
 
         } catch (err) {
             console.error(`[Sync] Failed sync for source ${sourceId}:`, err);
-            this.updateSyncStatus(sourceId, 'all', 'error', err.message);
+            this.updateSyncStatus(sourceId, 'all', 'error', { error: err.message });
         } finally {
             activeSyncs.delete(sourceId);
         }
@@ -154,17 +154,20 @@ class SyncService {
     /**
      * Update sync status in DB
      */
-    updateSyncStatus(sourceId, type, status, error = null) {
+    updateSyncStatus(sourceId, type, status, options = {}) {
+        const { error = null, providerCount = 0, databaseCount = 0 } = options;
         const db = getDb();
         const stmt = db.prepare(`
-            INSERT INTO sync_status (source_id, type, last_sync, status, error)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sync_status (source_id, type, last_sync, status, error, provider_count, database_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_id, type) DO UPDATE SET
                 last_sync = excluded.last_sync,
                 status = excluded.status,
-                error = excluded.error
+                error = excluded.error,
+                provider_count = excluded.provider_count,
+                database_count = excluded.database_count
         `);
-        stmt.run(sourceId, type, Date.now(), status, error);
+        stmt.run(sourceId, type, Date.now(), status, error, providerCount, databaseCount);
     }
 
     /**
@@ -175,38 +178,42 @@ class SyncService {
         const db = getDb();
 
         // 1. Live Categories
-        console.log(`[Sync] Fetching Live Categories for ${source.name}`);
         const liveCats = await api.getLiveCategories();
         await this.saveCategories(source.id, 'live', liveCats);
 
         // 2. Live Streams
-        console.log(`[Sync] Fetching Live Streams for ${source.name}`);
         const liveStreams = await api.getLiveStreams();
-        await this.saveStreams(source.id, 'live', liveStreams);
+        const syncedLive = await this.saveStreams(source.id, 'live', liveStreams);
+        this.updateSyncStatus(source.id, 'live', 'success', { 
+            providerCount: liveStreams.length, 
+            databaseCount: syncedLive.size 
+        });
 
         // 3. VOD Categories
-        console.log(`[Sync] Fetching VOD Categories for ${source.name}`);
         const vodCats = await api.getVodCategories();
         await this.saveCategories(source.id, 'movie', vodCats);
 
         // 4. VOD Streams
-        console.log(`[Sync] Fetching VOD Streams for ${source.name}`);
         const vodStreams = await api.getVodStreams();
-        await this.saveStreams(source.id, 'movie', vodStreams);
+        const syncedVod = await this.saveStreams(source.id, 'movie', vodStreams);
+        this.updateSyncStatus(source.id, 'movie', 'success', { 
+            providerCount: vodStreams.length, 
+            databaseCount: syncedVod.size 
+        });
 
         // 5. Series Categories
-        console.log(`[Sync] Fetching Series Categories for ${source.name}`);
         const seriesCats = await api.getSeriesCategories();
         await this.saveCategories(source.id, 'series', seriesCats);
 
         // 6. Series
-        console.log(`[Sync] Fetching Series for ${source.name}`);
         const series = await api.getSeries();
-        await this.saveStreams(source.id, 'series', series);
+        const syncedSeries = await this.saveStreams(source.id, 'series', series);
+        this.updateSyncStatus(source.id, 'series', 'success', { 
+            providerCount: series.length, 
+            databaseCount: syncedSeries.size 
+        });
 
         // 7. EPG (Xmltv)
-        // Try to fetch XMLTV if available
-        console.log(`[Sync] Fetching EPG for ${source.name}`);
         try {
             const xmltvUrl = api.getXmltvUrl();
             await this.syncEpgFromUrl(source.id, xmltvUrl);
@@ -220,7 +227,6 @@ class SyncService {
      */
     async saveCategories(sourceId, type, categories) {
         if (!categories || categories.length === 0) return;
-        console.log(`[Sync] Saving ${categories.length} ${type} categories for source ${sourceId}...`);
         const db = getDb();
         const stmt = db.prepare(`
             INSERT INTO categories (id, source_id, category_id, type, name, parent_id, data)
@@ -247,7 +253,6 @@ class SyncService {
             await new Promise(resolve => setImmediate(resolve));
         }
 
-        console.log(`[Sync] Saved ${categories.length} ${type} categories`);
     }
 
     /**
@@ -269,14 +274,16 @@ class SyncService {
 
         const stmt = db.prepare(`
             INSERT INTO playlist_items (
-                id, source_id, item_id, type, name, category_id, 
+                id, source_id, item_id, type, name, category_id, parent_id,
                 stream_icon, stream_url, container_extension, 
                 rating, year, added_at, data
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                type = excluded.type,
                 name = excluded.name,
                 category_id = excluded.category_id,
+                parent_id = excluded.parent_id,
                 stream_icon = excluded.stream_icon,
                 container_extension = excluded.container_extension,
                 data = excluded.data
@@ -287,14 +294,15 @@ class SyncService {
                 // Map fields based on type
                 let itemId, name, catId, icon, container;
                 let rating = null, year = null, added = null;
+                const itemType = item.type || type;
 
-                if (type === 'live') {
+                if (itemType === 'live') {
                     itemId = item.stream_id;
                     name = item.name || `Channel ${item.stream_id}`;
                     catId = item.category_id;
                     icon = item.stream_icon;
                     added = item.added;
-                } else if (type === 'movie') {
+                } else if (itemType === 'movie') {
                     itemId = item.stream_id;
                     name = item.name || `Movie ${item.stream_id}`;
                     catId = item.category_id;
@@ -302,28 +310,36 @@ class SyncService {
                     container = item.container_extension;
                     rating = item.rating;
                     added = item.added;
-                } else if (type === 'series') {
-                    itemId = item.series_id;
-                    name = item.name || `Series ${item.series_id}`;
+                } else if (itemType === 'series') {
+                    itemId = item.series_id || item.stream_id;
+                    name = item.name || `Series ${itemId}`;
                     catId = item.category_id;
-                    icon = item.cover;
+                    icon = item.cover || item.stream_icon;
                     rating = item.rating;
                     year = item.releaseDate;
-                    added = item.last_modified;
+                    added = item.last_modified || item.added;
+                } else if (itemType === 'episode') {
+                    itemId = item.stream_id || item.item_id;
+                    name = item.name;
+                    catId = item.category_id;
+                    icon = item.stream_icon;
                 }
-
-                const id = `${sourceId}:${itemId}`;
+                
+                const parentId = item.parent_id || null;
+                // Include type in ID to prevent collisions between live/movie/series with same ID
+                const id = `${sourceId}:${itemType}:${itemId}`;
                 syncedIds.add(id);
 
                 stmt.run(
                     id,
                     sourceId,
                     String(itemId),
-                    type,
+                    itemType,
                     name,
                     String(catId),
+                    parentId,
                     icon,
-                    null, // Direct URL not stored for Xtream usually, built on fly
+                    item.stream_url || null, // Store direct URL if provided (M3U)
                     container,
                     rating,
                     year,
@@ -346,7 +362,6 @@ class SyncService {
             await this.purgeStaleItems(sourceId, type, syncedIds);
         }
 
-        console.log(`[Sync] Saved ${items.length} ${type} items`);
         return syncedIds;
     }
 
@@ -389,15 +404,7 @@ class SyncService {
      * Processes EPG files in batches to avoid OOM on large EPG data
      */
     async syncEpgFromUrl(sourceId, url) {
-        console.log(`[Sync] Fetching EPG from: ${url.substring(0, 60)}...`);
-
-        // Temporary memory logging for verification
-        const logMemory = () => {
-            const used = process.memoryUsage();
-            console.log(`[Sync] Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB heap`);
-        };
-
-        logMemory();
+        // Remove per-batch memory logging - only log errors
 
         const db = getDb();
         let allChannels = [];
@@ -441,18 +448,11 @@ class SyncService {
                 totalProgrammes += batch.programmes.length;
             }
 
-            // Log progress every 10 batches
-            if (batchCount % 10 === 0) {
-                console.log(`[Sync] Processed ${totalProgrammes} programmes so far...`);
-                logMemory();
-            }
-
+            // Log progress (removed per-batch noise)
             // Yield to event loop
             await new Promise(resolve => setImmediate(resolve));
         }
 
-        console.log(`[Sync] EPG Parsed: ${allChannels.length} channels, ${totalProgrammes} programmes`);
-        logMemory();
 
         // Save EPG Channels
         if (allChannels.length > 0) {
@@ -486,10 +486,8 @@ class SyncService {
             });
 
             insertChannels(allChannels);
-            console.log(`[Sync] Saved ${allChannels.length} EPG channels`);
         }
 
-        console.log(`[Sync] Saved ${totalProgrammes} programmes`);
     }
 
     /**
@@ -497,68 +495,159 @@ class SyncService {
      * Processes M3U files in batches to avoid OOM on large playlists
      */
     async syncM3u(source) {
-        console.log(`[Sync] Fetching M3U playlist for ${source.name}`);
+        // Removed per-batch memory logging
 
-        // Temporary memory logging for verification
-        const logMemory = () => {
-            const used = process.memoryUsage();
-            console.log(`[Sync] Memory: ${Math.round(used.heapUsed / 1024 / 1024)}MB heap`);
-        };
-
-        logMemory();
-
+        let totalChannels = 0;
+        let syncedLiveCount = 0;
+        let syncedMovieCount = 0;
+        let syncedSeriesCount = 0;
+        let providerLiveCount = 0;
+        let providerMovieCount = 0;
+        let providerSeriesCount = 0;
         const allGroups = new Set();
         const allSyncedIds = new Set(); // Collect IDs across all batches
-        let totalChannels = 0;
         let batchCount = 0;
 
         // Stream and process in batches (default 500 channels per batch)
         for await (const batch of m3uParser.fetchAndParseStreaming(source.url)) {
             batchCount++;
 
-            // Map M3U channel format to our schema
-            const playlistItems = batch.channels.map(ch => ({
-                stream_id: ch.id,
-                name: ch.name,
-                category_id: ch.groupTitle || 'Uncategorized',
-                stream_icon: ch.tvgLogo,
-                stream_url: ch.url,
-                tvgId: ch.tvgId || null,
-            }));
+            // Map M3U channel format to our schema with type detection
+            const playlistItems = [];
+            const virtualSeries = new Map(); // seriesName -> seriesObject
+
+            batch.channels.forEach(ch => {
+                const groupTitle = ch.groupTitle || 'Uncategorized';
+                const url = ch.url || '';
+                
+                // Detect type based on group title or URL pattern
+                let type = 'live';
+                const groupLower = groupTitle.toLowerCase();
+                const urlLower = url.toLowerCase();
+                
+                if (groupLower.includes('series') || groupLower.includes('مسلسلات') || groupLower.includes('season') || urlLower.includes('/series/')) {
+                    type = 'series';
+                    providerSeriesCount++;
+                } else if (groupLower.includes('movie') || groupLower.includes('vod') || groupLower.includes('أفلام') || groupLower.includes('cinema') || urlLower.includes('/movie/')) {
+                    type = 'movie';
+                    providerMovieCount++;
+                } else {
+                    providerLiveCount++;
+                }
+
+                if (type === 'series') {
+                    // Try to parse series name and episode info
+                    const parsed = this.parseM3uSeriesInfo(ch.name);
+                    if (parsed) {
+                        const seriesName = parsed.seriesName;
+                        const seriesId = `series:${seriesName.toLowerCase().replace(/\s+/g, '_')}`;
+                        
+                        // Create virtual series item if not already in this batch
+                        if (!virtualSeries.has(seriesId)) {
+                            virtualSeries.set(seriesId, {
+                                type: 'series',
+                                stream_id: seriesId,
+                                name: seriesName,
+                                category_id: groupTitle,
+                                stream_icon: ch.tvgLogo,
+                                cover: ch.tvgLogo,
+                                last_modified: new Date().toISOString()
+                            });
+                        }
+
+                        // Add as episode
+                        playlistItems.push({
+                            stream_id: ch.id,
+                            name: ch.name,
+                            category_id: groupTitle,
+                            stream_icon: ch.tvgLogo,
+                            stream_url: url,
+                            tvgId: ch.tvgId || null,
+                            type: 'episode',
+                            parent_id: seriesId,
+                            episode_num: parsed.episode,
+                            season_num: parsed.season
+                        });
+                        return;
+                    }
+                }
+
+                // Default behavior for live, movie, or ungrouped series
+                playlistItems.push({
+                    stream_id: ch.id,
+                    name: ch.name,
+                    category_id: groupTitle,
+                    stream_icon: ch.tvgLogo,
+                    stream_url: url,
+                    tvgId: ch.tvgId || null,
+                    type: type 
+                });
+            });
+
+            // Add virtual series to the items to be saved
+            virtualSeries.forEach(s => playlistItems.push(s));
 
             // Save this batch immediately (skip purge - we'll do it at the end)
             if (playlistItems.length > 0) {
-                const batchIds = await this.saveStreams(source.id, 'live', playlistItems, { skipPurge: true });
-                batchIds.forEach(id => allSyncedIds.add(id));
+                // We use a generic 'm3u_item' type here because saveStreams will use item.type if present
+                const batchIds = await this.saveStreams(source.id, 'm3u_item', playlistItems, { skipPurge: true });
+                batchIds.forEach(id => {
+                    allSyncedIds.add(id);
+                    if (id.includes(':live:')) syncedLiveCount++;
+                    else if (id.includes(':movie:')) syncedMovieCount++;
+                    else if (id.includes(':series:')) syncedSeriesCount++;
+                });
                 totalChannels += playlistItems.length;
             }
 
             // Collect groups for category creation at the end
             batch.groups.forEach(g => allGroups.add(g));
 
-            // Log progress every 10 batches
-            if (batchCount % 10 === 0) {
-                console.log(`[Sync] Processed ${totalChannels} channels so far...`);
-                logMemory();
-            }
+            // Yield to event loop
+            await new Promise(resolve => setImmediate(resolve));
         }
 
-        console.log(`[Sync] M3U Parsed: ${totalChannels} channels, ${allGroups.size} groups`);
-        logMemory();
+
+        // Update final counts for M3U
+        this.updateSyncStatus(source.id, 'live', 'success', { providerCount: providerLiveCount, databaseCount: syncedLiveCount });
+        this.updateSyncStatus(source.id, 'movie', 'success', { providerCount: providerMovieCount, databaseCount: syncedMovieCount });
+        this.updateSyncStatus(source.id, 'series', 'success', { providerCount: providerSeriesCount, databaseCount: syncedSeriesCount });
 
         // Purge stale items after all batches are complete
         if (allSyncedIds.size > 0) {
+            // Since M3U can have multiple types, we purge by source_id and check against ALL synced IDs
+            // purgeStaleItems normally purges by type, so we might need a modified version or call it for each type
             await this.purgeStaleItems(source.id, 'live', allSyncedIds);
+            await this.purgeStaleItems(source.id, 'movie', allSyncedIds);
+            await this.purgeStaleItems(source.id, 'series', allSyncedIds);
         }
 
         // Save Categories (Groups) at the end
-        const categories = Array.from(allGroups).map(name => ({
-            category_id: name,
-            category_name: name,
-            parent_id: null
-        }));
+        const categories = Array.from(allGroups).map(name => {
+            const groupLower = name.toLowerCase();
+            let type = 'live';
+            if (groupLower.includes('series') || groupLower.includes('مسلسلات') || groupLower.includes('season')) {
+                type = 'series';
+            } else if (groupLower.includes('movie') || groupLower.includes('vod') || groupLower.includes('أفلام') || groupLower.includes('cinema')) {
+                type = 'movie';
+            }
 
-        await this.saveCategories(source.id, 'live', categories);
+            return {
+                category_id: name,
+                category_name: name,
+                parent_id: null,
+                type: type
+            };
+        });
+
+        // Split categories by type for saving
+        const liveCats = categories.filter(c => c.type === 'live');
+        const movieCats = categories.filter(c => c.type === 'movie');
+        const seriesCats = categories.filter(c => c.type === 'series');
+
+        if (liveCats.length > 0) await this.saveCategories(source.id, 'live', liveCats);
+        if (movieCats.length > 0) await this.saveCategories(source.id, 'movie', movieCats);
+        if (seriesCats.length > 0) await this.saveCategories(source.id, 'series', seriesCats);
         console.log(`[Sync] M3U sync complete for ${source.name}`);
     }
 
@@ -568,6 +657,41 @@ class SyncService {
     async syncEpg(source) {
         console.log(`[Sync] Fetching standalone EPG for ${source.name}`);
         await this.syncEpgFromUrl(source.id, source.url);
+    }
+    /**
+     * Parse M3U channel name for series/season/episode info
+     */
+    parseM3uSeriesInfo(name) {
+        if (!name) return null;
+
+        // Patterns to check
+        const patterns = [
+            // S01E01, S1E1, etc.
+            /(.*?)\s+S(\d+)\s*E(\d+)/i,
+            // 1x01, 01x01
+            /(.*?)\s+(\d+)x(\d+)/i,
+            // Season 1 Episode 1
+            /(.*?)\s+Season\s+(\d+)\s+Episode\s+(\d+)/i,
+            // Episode 1 (Generic)
+            /(.*?)\s+Episode\s+(\d+)/i,
+            // E01 (Generic)
+            /(.*?)\s+E(\d+)/i
+        ];
+
+        for (const pattern of patterns) {
+            const match = name.match(pattern);
+            if (match) {
+                const seriesName = match[1].trim().replace(/[:\-\s]+$/, '');
+                const season = match[2] ? parseInt(match[2]) : 1;
+                const episode = match[3] ? parseInt(match[3]) : (match[2] ? parseInt(match[2]) : 0);
+                
+                if (seriesName.length > 0) {
+                    return { seriesName, season, episode };
+                }
+            }
+        }
+
+        return null;
     }
 }
 

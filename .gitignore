@@ -10,3 +10,5 @@ dist/
 release/
 .vscode
 transcode-cache/
+scratch/
+

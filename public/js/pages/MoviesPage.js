@@ -41,7 +41,22 @@ class MoviesPage {
         let searchTimeout;
         this.searchInput?.addEventListener('input', () => {
             clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => this.filterAndRender(), 300);
+            const term = this.searchInput.value.trim();
+
+            searchTimeout = setTimeout(() => {
+                // If search is cleared, reload full list
+                if (term.length === 0) {
+                    this.loadMovies();
+                    return;
+                }
+
+                // If the library is large, use server-side search
+                if (this.movies.length > 5000 || term.length >= 3) {
+                    this.loadMovies(term);
+                } else {
+                    this.filterAndRender();
+                }
+            }, 500);
         });
 
         // Set up IntersectionObserver for lazy loading
@@ -93,7 +108,7 @@ class MoviesPage {
     async loadSources() {
         try {
             const allSources = await API.sources.getAll();
-            this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
+            this.sources = allSources.filter(s => (s.type === 'xtream' || s.type === 'm3u') && s.enabled);
 
             this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
             this.sources.forEach(s => {
@@ -160,7 +175,7 @@ class MoviesPage {
         }
     }
 
-    async loadMovies() {
+    async loadMovies(search = null) {
         this.isLoading = true;
         this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
 
@@ -187,7 +202,7 @@ class MoviesPage {
                         }
                     }
 
-                    const movies = await API.proxy.xtream.vodStreams(source.id, catId);
+                    const movies = await API.proxy.xtream.vodStreams(source.id, catId, { search: search });
                     console.log(`[Movies] Source ${source.id}, Category ${catId || 'ALL'}: Got ${movies?.length || 0} movies`);
                     if (movies && Array.isArray(movies)) {
                         movies.forEach(m => {
@@ -226,9 +241,15 @@ class MoviesPage {
                 const favKey = `${m.sourceId}:${m.stream_id}`;
                 if (!this.favoriteIds.has(favKey)) return false;
             }
-            if (searchTerm && !m.name?.toLowerCase().includes(searchTerm)) {
-                return false;
+            
+            // NOTE: We don't filter by searchTerm here if the list was already
+            // filtered by the server (server-side search).
+            if (this.movies.length <= 5000 && searchTerm.length < 3) {
+                if (searchTerm && !m.name?.toLowerCase().includes(searchTerm)) {
+                    return false;
+                }
             }
+            
             return true;
         });
 

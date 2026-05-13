@@ -111,6 +111,13 @@ class SourceManager {
     async loadSources() {
         try {
             const sources = await API.sources.getAll();
+            // Fetch sync statuses for all sources
+            try {
+                this.syncStatuses = await API.sources.getStatus();
+            } catch (e) {
+                console.warn('Could not fetch sync statuses:', e);
+                this.syncStatuses = [];
+            }
 
             this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
             this.renderSourceList(this.m3uList, sources.filter(s => s.type === 'm3u'), 'm3u');
@@ -131,12 +138,24 @@ class SourceManager {
 
         const icons = { xtream: Icons.live, m3u: Icons.guide, epg: Icons.series };
 
-        container.innerHTML = sources.map(source => `
+        container.innerHTML = sources.map(source => {
+            const sourceStats = (this.syncStatuses || []).filter(s => s.source_id === source.id);
+            const statsHtml = sourceStats.filter(s => s.type !== 'all' && s.type !== 'epg').map(s => {
+                const isMatch = s.provider_count === s.database_count;
+                const matchClass = isMatch ? 'stat-match' : 'stat-mismatch';
+                const label = s.type === 'live' ? 'Channels' : s.type === 'movie' ? 'Movies' : 'Series';
+                return `<span class="source-stat ${matchClass}" title="${label}: Provider=${s.provider_count}, DB=${s.database_count}">
+                    ${label}: ${s.database_count}${!isMatch ? '/' + s.provider_count : ''}
+                </span>`;
+            }).join('');
+
+            return `
       <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
           <div class="source-name">${source.name}</div>
           <div class="source-url">${source.url}</div>
+          <div class="source-stats-badges">${statsHtml}</div>
         </div>
         <div class="source-actions">
           <button class="btn btn-sm btn-secondary" data-action="refresh" title="Refresh Data">${Icons.refresh}</button>
@@ -148,7 +167,8 @@ class SourceManager {
           <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">${Icons.close}</button>
         </div>
       </div>
-    `).join('');
+    `;
+        }).join('');
 
         // Attach event listeners
         container.querySelectorAll('.source-item').forEach(item => {

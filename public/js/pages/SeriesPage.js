@@ -45,7 +45,22 @@ class SeriesPage {
         let searchTimeout;
         this.searchInput?.addEventListener('input', () => {
             clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => this.filterAndRender(), 300);
+            const term = this.searchInput.value.trim();
+
+            searchTimeout = setTimeout(() => {
+                // If search is cleared, reload full list
+                if (term.length === 0) {
+                    this.loadSeries();
+                    return;
+                }
+
+                // If the playlist is large, use server-side search
+                if (this.seriesList.length > 5000 || term.length >= 3) {
+                    this.loadSeries(term);
+                } else {
+                    this.filterAndRender();
+                }
+            }, 500);
         });
 
         // Back button
@@ -105,7 +120,7 @@ class SeriesPage {
     async loadSources() {
         try {
             const allSources = await API.sources.getAll();
-            this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
+            this.sources = allSources.filter(s => (s.type === 'xtream' || s.type === 'm3u') && s.enabled);
 
             this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
             this.sources.forEach(s => {
@@ -172,7 +187,7 @@ class SeriesPage {
         }
     }
 
-    async loadSeries() {
+    async loadSeries(search = null) {
         this.isLoading = true;
         this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
 
@@ -199,7 +214,7 @@ class SeriesPage {
                         }
                     }
 
-                    const series = await API.proxy.xtream.series(source.id, catId);
+                    const series = await API.proxy.xtream.series(source.id, catId, { search: search });
                     console.log(`[Series] Source ${source.id}, Category ${catId || 'ALL'}: Got ${series?.length || 0} series`);
                     if (series && Array.isArray(series)) {
                         series.forEach(s => {
@@ -238,9 +253,17 @@ class SeriesPage {
                 const favKey = `${s.sourceId}:${s.series_id}`;
                 if (!this.favoriteIds.has(favKey)) return false;
             }
-            if (searchTerm && !s.name?.toLowerCase().includes(searchTerm)) {
-                return false;
+            
+            // NOTE: We don't filter by searchTerm here if the list was already
+            // filtered by the server (server-side search). 
+            // If the list is large or term is long, loadSeries already did the work.
+            // If we are in client-side mode (small list), we still filter.
+            if (this.seriesList.length <= 5000 && searchTerm.length < 3) {
+                if (searchTerm && !s.name?.toLowerCase().includes(searchTerm)) {
+                    return false;
+                }
             }
+            
             return true;
         });
 

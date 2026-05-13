@@ -107,6 +107,7 @@ const API = {
             liveStreams: (sourceId, categoryId = null, options = {}) => {
                 const params = [];
                 if (categoryId) params.push(`category_id=${categoryId}`);
+                if (options.search) params.push(`search=${encodeURIComponent(options.search)}`);
                 if (options.includeHidden) params.push('includeHidden=true');
                 const query = params.length ? `?${params.join('&')}` : '';
                 return API.request('GET', `/proxy/xtream/${sourceId}/live_streams${query}`);
@@ -118,6 +119,7 @@ const API = {
             vodStreams: (sourceId, categoryId = null, options = {}) => {
                 const params = [];
                 if (categoryId) params.push(`category_id=${categoryId}`);
+                if (options.search) params.push(`search=${encodeURIComponent(options.search)}`);
                 if (options.includeHidden) params.push('includeHidden=true');
                 const query = params.length ? `?${params.join('&')}` : '';
                 return API.request('GET', `/proxy/xtream/${sourceId}/vod_streams${query}`);
@@ -129,6 +131,7 @@ const API = {
             series: (sourceId, categoryId = null, options = {}) => {
                 const params = [];
                 if (categoryId) params.push(`category_id=${categoryId}`);
+                if (options.search) params.push(`search=${encodeURIComponent(options.search)}`);
                 if (options.includeHidden) params.push('includeHidden=true');
                 const query = params.length ? `?${params.join('&')}` : '';
                 return API.request('GET', `/proxy/xtream/${sourceId}/series${query}`);
