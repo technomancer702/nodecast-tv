@@ -63,7 +63,7 @@ router.get('/:id', async (req, res) => {
 // Create source
 router.post('/', async (req, res) => {
     try {
-        const { type, name, url, username, password } = req.body;
+        const { type, name, url, username, password, zapBeforeStreaming, zapDelay } = req.body;
 
         if (!type || !name || !url) {
             return res.status(400).json({ error: 'Type, name, and URL are required' });
@@ -73,7 +73,7 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        const source = await sources.create({ type, name, url, username, password });
+        const source = await sources.create({ type, name, url, username, password, zapBeforeStreaming: zapBeforeStreaming === true, zapDelay: parseInt(zapDelay) || 1500 });
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
         res.status(201).json(source);
@@ -91,12 +91,14 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Source not found' });
         }
 
-        const { name, url, username, password } = req.body;
+        const { name, url, username, password, zapBeforeStreaming, zapDelay } = req.body;
         const updated = await sources.update(req.params.id, {
             name: name || existing.name,
             url: url || existing.url,
             username: username !== undefined ? username : existing.username,
-            password: password !== undefined ? password : existing.password
+            password: password !== undefined ? password : existing.password,
+            zapBeforeStreaming: zapBeforeStreaming !== undefined ? zapBeforeStreaming === true : existing.zapBeforeStreaming || false,
+            zapDelay: zapDelay !== undefined ? parseInt(zapDelay) || 1500: existing.zapDelay || 1500
         });
         // Trigger Sync (if critical fields changed? safely just trigger it)
         syncService.syncSource(parseInt(req.params.id)).catch(console.error);

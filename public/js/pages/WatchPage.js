@@ -456,6 +456,7 @@ class WatchPage {
 
                     this.updateTranscodeStatus(statusMode, statusText);
                     const playlistUrl = await this.startTranscodeSession(url, {
+                        program: this.content?.program || this.content?.data?.program || null,
                         videoMode,
                         seekOffset: this.resumeTime, // Ensure seekOffset is passed
                         videoCodec: info.video,
@@ -493,6 +494,7 @@ class WatchPage {
             console.log(`[WatchPage] ${statusText} enabled. Starting session (encode)...`);
             this.updateTranscodeStatus(statusMode, statusText);
             const playlistUrl = await this.startTranscodeSession(url, {
+                program: this.content?.program || this.content?.data?.program || null,
                 videoMode: 'encode',
                 seekOffset: this.resumeTime
             });
@@ -515,6 +517,7 @@ class WatchPage {
             } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
 
             const playlistUrl = await this.startTranscodeSession(url, {
+                program: this.currentChannel?.program || null,
                 videoMode: 'copy',
                 videoCodec,
                 seekOffset: this.resumeTime

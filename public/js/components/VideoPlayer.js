@@ -851,6 +851,11 @@ class VideoPlayer {
      * Play a channel
      */
     async play(channel, streamUrl) {
+        
+        if(this.currentChannel != channel && channel?.zapBeforeStreaming){
+            await this.zapBeforeStreaming(channel, streamUrl);
+        }
+
         this.currentChannel = channel;
 
         try {
@@ -917,6 +922,7 @@ class VideoPlayer {
 
                         this.updateTranscodeStatus(statusMode, statusText);
                         const playlistUrl = await this.startTranscodeSession(streamUrl, {
+                            program: channel?.program || null,
                             videoMode,
                             videoCodec: info.video,
                             audioCodec: info.audio,
@@ -961,7 +967,10 @@ class VideoPlayer {
                 const statusMode = this.settings.upscaleEnabled ? 'upscaling' : 'transcoding';
                 console.log(`[Player] ${statusText} enabled. Starting session (encode)...`);
                 this.updateTranscodeStatus(statusMode, statusText);
-                const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode: 'encode' });
+                const playlistUrl = await this.startTranscodeSession(streamUrl, { 
+                    program: channel?.program || null, 
+                    videoMode: 'encode' 
+                });
                 this.currentUrl = playlistUrl;
 
                 // Load HLS
@@ -1012,7 +1021,7 @@ class VideoPlayer {
                     videoCodec = info.video;
                 } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
 
-                const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode: 'copy', videoCodec });
+                const playlistUrl = await this.startTranscodeSession(streamUrl, { program: channel?.program || null, videoMode: 'copy', videoCodec });
                 this.currentUrl = playlistUrl;
 
                 console.log('[Player] Playing transcoded HLS stream:', playlistUrl);
@@ -1564,6 +1573,43 @@ class VideoPlayer {
             this.container.requestFullscreen();
         }
     }
+
+    async zapBeforeStreaming(channel, streamUrl) {
+        if (!channel?.zapBeforeStreaming) return;
+        if (!channel?.streamId || !streamUrl) return;
+
+        const delay = parseInt(channel.zapDelay) || 1500;
+
+        try {
+            const u = new URL(streamUrl);
+            const boxUrl = `${u.protocol}//${u.hostname}`;
+
+            console.log('[ZAP] before streaming:', {
+                channel: channel.name,
+                serviceRef: channel.streamId,
+                boxUrl,
+                delay
+            });
+
+            const res = await fetch('/api/openwebif/zap', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    boxUrl,
+                    serviceRef: channel.streamId
+                })
+            });
+
+            if (!res.ok) {
+                console.warn('[ZAP] backend returned:', res.status);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delay));
+        } catch (err) {
+            console.warn('[ZAP] failed, continuing stream:', err);
+        }
+    }
+
 }
 
 // Export

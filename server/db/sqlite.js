@@ -143,6 +143,13 @@ function initSchema() {
         // Column already exists, ignore
     }
 
+    try {
+        db.exec(`ALTER TABLE playlist_items ADD COLUMN program TEXT`);
+        console.log('[SQLite] Added program column to playlist_items');
+    } catch (e) {
+        // Column already exists, ignore
+    }
+    
     console.log('[SQLite] Schema initialized');
 }
 

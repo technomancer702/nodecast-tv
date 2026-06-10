@@ -255,7 +255,22 @@ class SourceManager {
       `;
         }
 
-        return nameField + urlField;
+        const enigmaOptions = type === 'm3u' ? `
+        <div class="form-group">
+            <label class="checkbox-label">
+            <input type="checkbox" id="source-zap-before-streaming" ${source.zapBeforeStreaming ? 'checked' : ''}>
+            Zap before streaming (Enigma2/OpenWebif)
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label for="source-zap-delay">Zap delay (ms)</label>
+            <input type="number" id="source-zap-delay" class="form-input"
+                value="${source.zapDelay || 1500}" min="0" step="100">
+        </div>
+        ` : '';
+
+        return nameField + urlField + enigmaOptions;
     }
 
     /**
@@ -266,6 +281,8 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim() || null;
         const password = document.getElementById('source-password')?.value.trim() || null;
+        const zapBeforeStreaming = document.getElementById('source-zap-before-streaming')?.checked || false;
+        const zapDelay = parseInt(document.getElementById('source-zap-delay')?.value) || 1500;
 
         if (!name || !url) {
             alert('Name and URL are required');
@@ -295,7 +312,7 @@ class SourceManager {
                 }
             }
 
-            await API.sources.create({ type, name, url, username, password });
+            await API.sources.create({ type, name, url, username, password, zapBeforeStreaming, zapDelay });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
 
@@ -322,14 +339,17 @@ class SourceManager {
             alert('Name and URL are required');
             return;
         }
-
+        console.log("[updateSource] type:",type);
         try {
             const data = { name, url };
             if (type === 'xtream') {
                 data.username = username;
                 if (password) data.password = password;
             }
-
+            if (type === 'm3u') {
+                data.zapBeforeStreaming = document.getElementById('source-zap-before-streaming')?.checked || false;
+                data.zapDelay = parseInt(document.getElementById('source-zap-delay')?.value) || 1500;
+            }
             await API.sources.update(id, data);
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();

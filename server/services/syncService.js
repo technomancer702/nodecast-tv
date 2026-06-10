@@ -270,14 +270,16 @@ class SyncService {
         const stmt = db.prepare(`
             INSERT INTO playlist_items (
                 id, source_id, item_id, type, name, category_id, 
-                stream_icon, stream_url, container_extension, 
+                stream_icon, stream_url,program, container_extension, 
                 rating, year, added_at, data
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 category_id = excluded.category_id,
                 stream_icon = excluded.stream_icon,
+                stream_url = excluded.stream_url,
+                program = excluded.program,
                 container_extension = excluded.container_extension,
                 data = excluded.data
         `);
@@ -324,6 +326,7 @@ class SyncService {
                     String(catId),
                     icon,
                     null, // Direct URL not stored for Xtream usually, built on fly
+                    item.program || null,
                     container,
                     rating,
                     year,
@@ -459,9 +462,9 @@ class SyncService {
             const channelStmt = db.prepare(`
                 INSERT INTO playlist_items (
                     id, source_id, item_id, type, name, stream_icon, 
-                    stream_url, category_id, data
+                    stream_url, program, category_id, data
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     stream_icon = excluded.stream_icon,
@@ -478,8 +481,9 @@ class SyncService {
                         'epg_channel',
                         ch.name,
                         ch.icon || null,
-                        null,
-                        null,
+                        null,   // stream_url
+                        null,   // program
+                        null,   // category_id
                         JSON.stringify(ch)
                     );
                 }
@@ -524,6 +528,7 @@ class SyncService {
                 stream_icon: ch.tvgLogo,
                 stream_url: ch.url,
                 tvgId: ch.tvgId || null,
+                program: ch.program || null,
             }));
 
             // Save this batch immediately (skip purge - we'll do it at the end)

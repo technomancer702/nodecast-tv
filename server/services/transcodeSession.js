@@ -211,8 +211,12 @@ class TranscodeSession extends EventEmitter {
         }
 
         // Map streams
-        args.push('-map', '0:v:0');
-        args.push('-map', '0:a:0?');
+       if (this.options.program) {
+            args.push('-map', `p:${this.options.program}`);
+        } else {
+            args.push('-map', '0:v:0');
+            args.push('-map', '0:a:0?');
+        }
 
         // Add video encoder and filters based on selected encoder OR copy
         if (videoMode === 'copy') {
