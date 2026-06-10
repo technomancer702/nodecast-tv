@@ -88,6 +88,7 @@ async function parse(input) {
     const groupsSet = new Set();
     let currentInfo = null;
     let currentGroup = null;
+    let currentVlcProgram = null;
 
     let lines;
 
@@ -121,6 +122,11 @@ async function parse(input) {
             if (currentInfo) {
                 currentInfo.groupTitle = currentGroup;
             }
+        } else if (trimmed.startsWith('#EXTVLCOPT:program=')) {
+            currentVlcProgram = trimmed.split('=')[1]?.trim() || null;
+            if (currentInfo) {
+                currentInfo.program = currentVlcProgram;
+            }
         } else if (!trimmed.startsWith('#')) {
             // This is a stream URL
             if (currentInfo) {
@@ -132,9 +138,11 @@ async function parse(input) {
                     ...currentInfo,
                     id: stableId,
                     url: trimmed,
+                    program: currentVlcProgram,
                     groupTitle: groupTitle
                 });
                 currentInfo = null;
+                currentVlcProgram = null;
             }
         }
     }
@@ -216,6 +224,11 @@ async function* parseStreaming(input, batchSize = 500) {
             if (currentInfo) {
                 currentInfo.groupTitle = currentGroup;
             }
+        } else if (trimmed.startsWith('#EXTVLCOPT:program=')) {
+            currentVlcProgram = trimmed.split('=')[1]?.trim() || null;
+            if (currentInfo) {
+                currentInfo.program = currentVlcProgram;
+            }
         } else if (!trimmed.startsWith('#')) {
             if (currentInfo) {
                 const groupTitle = currentInfo.groupTitle || currentGroup || 'Uncategorized';
@@ -225,9 +238,11 @@ async function* parseStreaming(input, batchSize = 500) {
                     ...currentInfo,
                     id: stableId,
                     url: trimmed,
+                    program: currentVlcProgram,
                     groupTitle: groupTitle
                 });
                 currentInfo = null;
+                currentVlcProgram = null;
 
                 // Yield batch when full
                 if (batch.length >= batchSize) {

@@ -58,6 +58,7 @@ class M3uXtreamAdapter {
                 name,
                 stream_icon,
                 stream_url,
+                program,
                 category_id,
                 added_at,
                 data
@@ -92,6 +93,7 @@ class M3uXtreamAdapter {
                 added: row.added_at,
                 // M3U-specific: direct stream URL (Xtream builds URLs from credentials)
                 stream_url: row.stream_url,
+                program: row.program || extra.program || null,
                 // Include extra fields from parser (tvgId, etc.)
                 epg_channel_id: extra.tvgId || null,
                 ...extra
