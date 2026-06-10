@@ -820,6 +820,8 @@ class ChannelList {
             this.groups = [];
         }
 
+        const source = await API.sources.getById(sourceId);
+
         // Use Xtream API endpoints - backend now supports M3U sources too
         const categories = await API.proxy.xtream.liveCategories(sourceId);
         const streams = await API.proxy.xtream.liveStreams(sourceId);
@@ -842,6 +844,9 @@ class ChannelList {
             tvgId: stream.epg_channel_id,
             tvgLogo: stream.stream_icon,
             url: stream.stream_url, // M3U has direct URLs
+            program: stream.program || null,
+            zapBeforeStreaming: source?.zapBeforeStreaming || false,
+            zapDelay: source?.zapDelay || 1500,
             groupId: `m3u_${sourceId}_${stream.category_id}`,
             groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
             sourceId,
