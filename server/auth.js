@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const passport = require('passport');
 const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const { Strategy: LocalStrategy } = require('passport-local');
+const speakeasy = require('speakeasy');
 
 /**
  * Authentication and Authorization Module
@@ -13,6 +14,7 @@ const { Strategy: LocalStrategy } = require('passport-local');
 // JWT Secret - In production, use environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'nodecast-tv-secret-key-change-in-production';
 const JWT_EXPIRY = '24h';
+const TEMP_TOKEN_EXPIRY = '5m';
 
 /**
  * Hash password using bcrypt
@@ -52,6 +54,56 @@ function verifyToken(token) {
         return jwt.verify(token, JWT_SECRET);
     } catch (err) {
         return null;
+    }
+}
+
+/**
+ * Generate a short-lived temp token used during the 2FA verification step
+ */
+function generateTempToken(userId) {
+    return jwt.sign({ id: userId, purpose: '2fa' }, JWT_SECRET, { expiresIn: TEMP_TOKEN_EXPIRY });
+}
+
+/**
+ * Verify a temp 2FA token and return the payload, or null if invalid
+ */
+function verifyTempToken(token) {
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (payload.purpose !== '2fa') return null;
+        return payload;
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * Generate a new TOTP secret for a user (returns base32 string)
+ */
+function generateTotpSecret() {
+    return speakeasy.generateSecret({ length: 20 }).base32;
+}
+
+/**
+ * Generate the otpauth URI used to build the QR code
+ */
+function generateTotpUri(username, secret) {
+    return speakeasy.otpauthURL({
+        secret,
+        label: username,
+        issuer: 'NodeCast TV',
+        encoding: 'base32'
+    });
+}
+
+/**
+ * Verify a TOTP token against a secret
+ */
+function verifyTotpToken(token, secret) {
+    try {
+        return speakeasy.totp.verify({ secret, encoding: 'base32', token: String(token), window: 1 });
+    } catch (err) {
+        return false;
     }
 }
 
@@ -258,6 +310,11 @@ module.exports = {
     verifyPassword,
     generateToken,
     verifyToken,
+    generateTempToken,
+    verifyTempToken,
+    generateTotpSecret,
+    generateTotpUri,
+    verifyTotpToken,
     configureLocalStrategy,
     configureJwtStrategy,
     configureSessionSerialization,

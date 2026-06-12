@@ -775,6 +775,7 @@
                       <th>Username</th>
                       <th>Email</th>
                       <th>Role</th>
+                      <th>2FA</th>
                       <th>Created</th>
                       <th>Actions</th>
                     </tr>
@@ -1084,6 +1085,52 @@
             <label>OIDC Provider ID</label>
             <code id="edit-oidc-id"
               style="font-size: 0.8rem; color: var(--color-text-muted); padding: 4px; background: rgba(0,0,0,0.3); border-radius: 4px; display: block;"></code>
+          </div>
+
+          <!-- 2FA section -->
+          <div class="modal-form-group" id="edit-totp-group" style="border-top:1px solid var(--color-border);padding-top:16px;margin-top:4px;">
+            <label style="display:flex;align-items:center;gap:8px;">
+              Two-Factor Authentication
+              <span id="edit-totp-badge" class="user-badge" style="font-size:11px;"></span>
+            </label>
+
+            <!-- Setup flow -->
+            <div id="edit-totp-setup" style="display:none;margin-top:12px;">
+              <p class="hint" style="margin-bottom:10px;">Scan the QR code with Google Authenticator, Authy, or similar. Then enter the 6-digit code to confirm.</p>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+                <img id="edit-totp-qr" src="" alt="QR Code" style="width:140px;height:140px;border-radius:6px;background:#fff;padding:4px;flex-shrink:0;">
+                <div style="flex:1;min-width:180px;">
+                  <p class="hint" style="margin-bottom:4px;font-size:12px;">Manual key:</p>
+                  <code id="edit-totp-secret" style="font-size:12px;word-break:break-all;color:var(--color-accent);display:block;margin-bottom:10px;"></code>
+                  <input type="text" id="edit-totp-code" class="form-input" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" style="margin-bottom:8px;">
+                  <div style="display:flex;gap:6px;">
+                    <button type="button" id="btn-edit-totp-confirm" class="btn btn-primary btn-sm">Enable 2FA</button>
+                    <button type="button" id="btn-edit-totp-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+                  </div>
+                  <p id="edit-totp-error" style="color:var(--color-error);font-size:12px;margin-top:6px;display:none;"></p>
+                </div>
+              </div>
+            </div>
+
+            <!-- View current QR (when 2FA already enabled) -->
+            <div id="edit-totp-view" style="display:none;margin-top:12px;">
+              <p class="hint" style="margin-bottom:10px;">Current QR code and secret key for this user's authenticator app.</p>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+                <img id="edit-totp-view-qr" src="" alt="QR Code" style="width:140px;height:140px;border-radius:6px;background:#fff;padding:4px;flex-shrink:0;">
+                <div style="flex:1;min-width:180px;">
+                  <p class="hint" style="margin-bottom:4px;font-size:12px;">Secret key:</p>
+                  <code id="edit-totp-view-secret" style="font-size:12px;word-break:break-all;color:var(--color-accent);display:block;margin-bottom:10px;"></code>
+                  <button type="button" id="btn-edit-totp-view-close" class="btn btn-secondary btn-sm">Close</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action buttons (when setup not open) -->
+            <div id="edit-totp-actions" style="margin-top:10px;display:flex;gap:8px;">
+              <button type="button" id="btn-edit-totp-setup" class="btn btn-secondary btn-sm" style="display:none;">Setup 2FA</button>
+              <button type="button" id="btn-edit-totp-view" class="btn btn-secondary btn-sm" style="display:none;">View QR Code</button>
+              <button type="button" id="btn-edit-totp-disable" class="btn btn-error btn-sm" style="display:none;">Disable 2FA</button>
+            </div>
           </div>
         </form>
       </div>

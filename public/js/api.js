@@ -166,6 +166,34 @@ const API = {
         create: (data) => API.request('POST', '/auth/users', data),
         update: (id, data) => API.request('PUT', `/auth/users/${id}`, data),
         delete: (id) => API.request('DELETE', `/auth/users/${id}`)
+    },
+
+    // Auth
+    auth: {
+        checkSetup: () => API.request('GET', '/auth/setup-required'),
+        setup: (username, password) => API.request('POST', '/auth/setup', { username, password }),
+        login: (username, password) => API.request('POST', '/auth/login', { username, password }),
+        logout: () => API.request('POST', '/auth/logout'),
+        me: () => API.request('GET', '/auth/me'),
+        totp: {
+            status: () => API.request('GET', '/auth/2fa/status'),
+            setup: () => API.request('GET', '/auth/2fa/setup'),
+            enable: (code) => API.request('POST', '/auth/2fa/enable', { code }),
+            disable: (password) => API.request('POST', '/auth/2fa/disable', { password }),
+            verify: (tempToken, code) => API.request('POST', '/auth/2fa/verify', { tempToken, code }),
+            // Admin: manage 2FA for any user
+            adminStatus: (userId) => API.request('GET', `/auth/users/${userId}/2fa/status`),
+            adminSetup: (userId) => API.request('GET', `/auth/users/${userId}/2fa/setup`),
+            adminEnable: (userId, code) => API.request('POST', `/auth/users/${userId}/2fa/enable`, { code }),
+            adminDisable: (userId) => API.request('DELETE', `/auth/users/${userId}/2fa`),
+            adminQr: (userId) => API.request('GET', `/auth/users/${userId}/2fa/qr`)
+        }
+    },
+
+    getToken: () => localStorage.getItem('authToken'),
+    setToken: (token) => {
+        if (token) localStorage.setItem('authToken', token);
+        else localStorage.removeItem('authToken');
     }
 };
 

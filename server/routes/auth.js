@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const QRCode = require('qrcode');
 const db = require('../db');
 const auth = require('../auth');
 
@@ -110,7 +111,7 @@ router.post('/setup', async (req, res) => {
  * POST /api/auth/login
  */
 router.post('/login', (req, res, next) => {
-    auth.passport.authenticate('local', { session: false }, (err, user, info) => {
+    auth.passport.authenticate('local', { session: false }, async (err, user, info) => {
         if (err) {
             console.error('Login error:', err);
             return res.status(500).json({ error: 'Server error' });
@@ -120,18 +121,294 @@ router.post('/login', (req, res, next) => {
             return res.status(401).json({ error: info?.message || 'Invalid credentials' });
         }
 
-        // Generate JWT token
-        const token = auth.generateToken(user);
+        // If 2FA is enabled, issue a short-lived temp token instead of the full JWT
+        const fullUser = await db.users.getById(user.id);
+        if (fullUser && fullUser.totpEnabled) {
+            const tempToken = auth.generateTempToken(user.id);
+            return res.json({ requires2fa: true, tempToken });
+        }
 
+        const token = auth.generateToken(user);
         res.json({
             token,
-            user: {
-                id: user.id,
-                username: user.username,
-                role: user.role
-            }
+            user: { id: user.id, username: user.username, role: user.role }
         });
     })(req, res, next);
+});
+
+/**
+ * Verify TOTP code after login
+ * POST /api/auth/2fa/verify
+ */
+router.post('/2fa/verify', async (req, res) => {
+    try {
+        const { tempToken, code } = req.body;
+
+        if (!tempToken || !code) {
+            return res.status(400).json({ error: 'tempToken and code are required' });
+        }
+
+        const payload = auth.verifyTempToken(tempToken);
+        if (!payload) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+
+        const user = await db.users.getById(payload.id);
+        if (!user || !user.totpEnabled || !user.totpSecret) {
+            return res.status(401).json({ error: 'Invalid request' });
+        }
+
+        if (!auth.verifyTotpToken(String(code), user.totpSecret)) {
+            return res.status(401).json({ error: 'Invalid authenticator code' });
+        }
+
+        const token = auth.generateToken(user);
+        res.json({
+            token,
+            user: { id: user.id, username: user.username, role: user.role }
+        });
+    } catch (err) {
+        console.error('2FA verify error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Start 2FA setup — generate secret and return QR code
+ * GET /api/auth/2fa/setup
+ */
+router.get('/2fa/setup', auth.requireAuth, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled' });
+        }
+
+        const secret = auth.generateTotpSecret();
+        const uri = auth.generateTotpUri(user.username, secret);
+        const qrDataUrl = await QRCode.toDataURL(uri);
+
+        // Store the pending secret (not yet enabled until verified)
+        await db.users.update(user.id, { totpPendingSecret: secret });
+
+        res.json({ qrDataUrl, secret });
+    } catch (err) {
+        console.error('2FA setup error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Confirm 2FA setup — verify code and activate
+ * POST /api/auth/2fa/enable
+ */
+router.post('/2fa/enable', auth.requireAuth, async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) return res.status(400).json({ error: 'code is required' });
+
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled' });
+        }
+
+        if (!user.totpPendingSecret) {
+            return res.status(400).json({ error: 'No pending 2FA setup. Call GET /2fa/setup first.' });
+        }
+
+        if (!auth.verifyTotpToken(String(code), user.totpPendingSecret)) {
+            return res.status(401).json({ error: 'Invalid authenticator code' });
+        }
+
+        await db.users.update(user.id, {
+            totpSecret: user.totpPendingSecret,
+            totpEnabled: true,
+            totpPendingSecret: null
+        });
+
+        res.json({ success: true, message: '2FA enabled successfully' });
+    } catch (err) {
+        console.error('2FA enable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Disable 2FA — requires password confirmation
+ * POST /api/auth/2fa/disable
+ */
+router.post('/2fa/disable', auth.requireAuth, async (req, res) => {
+    try {
+        const { password } = req.body;
+        if (!password) return res.status(400).json({ error: 'password is required' });
+
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is not enabled' });
+        }
+
+        if (!user.passwordHash || !(await auth.verifyPassword(password, user.passwordHash))) {
+            return res.status(401).json({ error: 'Invalid password' });
+        }
+
+        await db.users.update(user.id, {
+            totpSecret: null,
+            totpEnabled: false,
+            totpPendingSecret: null
+        });
+
+        res.json({ success: true, message: '2FA disabled successfully' });
+    } catch (err) {
+        console.error('2FA disable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Get 2FA status for the current user
+ * GET /api/auth/2fa/status
+ */
+router.get('/2fa/status', auth.requireAuth, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ totpEnabled: !!user.totpEnabled });
+    } catch (err) {
+        console.error('2FA status error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: get 2FA status for any user
+ * GET /api/auth/users/:id/2fa/status
+ */
+router.get('/users/:id/2fa/status', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ totpEnabled: !!user.totpEnabled });
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: view QR code for a user with 2FA already enabled
+ * GET /api/auth/users/:id/2fa/qr
+ */
+router.get('/users/:id/2fa/qr', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.totpEnabled || !user.totpSecret) {
+            return res.status(400).json({ error: '2FA is not enabled for this user' });
+        }
+
+        const uri = auth.generateTotpUri(user.username, user.totpSecret);
+        const qrDataUrl = await QRCode.toDataURL(uri);
+
+        res.json({ qrDataUrl, secret: user.totpSecret });
+    } catch (err) {
+        console.error('Admin 2FA QR error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: start 2FA setup for any user — generate secret + QR code
+ * GET /api/auth/users/:id/2fa/setup
+ */
+router.get('/users/:id/2fa/setup', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled for this user' });
+        }
+
+        const secret = auth.generateTotpSecret();
+        const uri = auth.generateTotpUri(user.username, secret);
+        const qrDataUrl = await QRCode.toDataURL(uri);
+
+        await db.users.update(user.id, { totpPendingSecret: secret });
+
+        res.json({ qrDataUrl, secret });
+    } catch (err) {
+        console.error('Admin 2FA setup error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: confirm 2FA setup for any user
+ * POST /api/auth/users/:id/2fa/enable
+ */
+router.post('/users/:id/2fa/enable', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) return res.status(400).json({ error: 'code is required' });
+
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled for this user' });
+        }
+
+        if (!user.totpPendingSecret) {
+            return res.status(400).json({ error: 'No pending 2FA setup. Call GET /users/:id/2fa/setup first.' });
+        }
+
+        if (!auth.verifyTotpToken(String(code), user.totpPendingSecret)) {
+            return res.status(401).json({ error: 'Invalid authenticator code' });
+        }
+
+        await db.users.update(user.id, {
+            totpSecret: user.totpPendingSecret,
+            totpEnabled: true,
+            totpPendingSecret: null
+        });
+
+        res.json({ success: true, message: '2FA enabled successfully' });
+    } catch (err) {
+        console.error('Admin 2FA enable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: force-disable 2FA for any user
+ * DELETE /api/auth/users/:id/2fa
+ */
+router.delete('/users/:id/2fa', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is not enabled for this user' });
+        }
+
+        await db.users.update(user.id, {
+            totpSecret: null,
+            totpEnabled: false,
+            totpPendingSecret: null
+        });
+
+        res.json({ success: true, message: '2FA disabled successfully' });
+    } catch (err) {
+        console.error('Admin 2FA disable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 /**
@@ -175,10 +452,9 @@ router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const allUsers = await db.users.getAll();
 
-        // Remove password hashes
         const users = allUsers.map(u => {
-            const { passwordHash, ...userWithoutPassword } = u;
-            return userWithoutPassword;
+            const { passwordHash, totpSecret, totpPendingSecret, ...safe } = u;
+            return safe;
         });
 
         res.json(users);

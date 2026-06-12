@@ -130,6 +130,13 @@
             transform: none;
         }
 
+        .totp-hint {
+            color: var(--color-text-secondary);
+            font-size: 13px;
+            text-align: center;
+            margin-top: var(--space-sm);
+        }
+
         .error-message {
             background: rgba(239, 68, 68, 0.1);
             color: var(--color-error);
@@ -180,6 +187,7 @@
                 Welcome! Please create your admin account to get started.
             </div>
 
+            <!-- Step 1: username + password -->
             <form id="login-form">
                 <div class="form-group">
                     <label for="username">Username</label>
@@ -194,6 +202,21 @@
                 </div>
 
                 <button type="submit" class="btn-login" id="submit-btn">Sign In</button>
+            </form>
+
+            <!-- Step 2: 2FA code (hidden until needed) -->
+            <form id="totp-form" style="display:none;">
+                <div class="form-group">
+                    <label for="totp-code">Authenticator Code</label>
+                    <input type="text" id="totp-code" name="totp-code" inputmode="numeric" pattern="[0-9]{6}"
+                        maxlength="6" autocomplete="one-time-code" placeholder="6-digit code" autofocus>
+                </div>
+                <p class="totp-hint">Enter the code from your authenticator app.</p>
+                <button type="submit" class="btn-login" id="totp-submit-btn">Verify</button>
+                <button type="button" class="btn-login" id="totp-back-btn"
+                    style="margin-top:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);">
+                    Back
+                </button>
             </form>
 
             <div class="sso-divider" style="text-align: center; margin: 20px 0; position: relative;">
@@ -265,20 +288,49 @@
             }
         }
 
-        // Handle form submission
+        let pendingTempToken = null;
+
+        function showError(msg) {
+            const el = document.getElementById('error-message');
+            el.textContent = msg;
+            el.classList.add('show');
+        }
+
+        function clearError() {
+            const el = document.getElementById('error-message');
+            el.textContent = '';
+            el.classList.remove('show');
+        }
+
+        function showTotpStep() {
+            document.getElementById('login-form').style.display = 'none';
+            document.querySelector('.sso-divider').style.display = 'none';
+            document.getElementById('btn-sso-login').style.display = 'none';
+            document.getElementById('totp-form').style.display = 'block';
+            document.getElementById('login-subtitle').textContent = 'Two-Factor Authentication';
+            document.getElementById('totp-code').focus();
+        }
+
+        function showLoginStep() {
+            document.getElementById('login-form').style.display = 'block';
+            if (!isSetupMode) {
+                document.querySelector('.sso-divider').style.display = 'block';
+                document.getElementById('btn-sso-login').style.display = 'flex';
+            }
+            document.getElementById('totp-form').style.display = 'none';
+            document.getElementById('login-subtitle').textContent = isSetupMode ? 'Create Admin Account' : 'Sign in to continue';
+            pendingTempToken = null;
+        }
+
+        // Handle login form submission
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             const submitBtn = document.getElementById('submit-btn');
-            const errorMessage = document.getElementById('error-message');
 
-            // Clear previous errors
-            errorMessage.classList.remove('show');
-            errorMessage.textContent = '';
-
-            // Disable button
+            clearError();
             submitBtn.disabled = true;
             submitBtn.textContent = 'Please wait...';
 
@@ -286,9 +338,7 @@
                 const endpoint = isSetupMode ? '/api/auth/setup' : '/api/auth/login';
                 const response = await fetch(endpoint, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
 
@@ -298,18 +348,61 @@
                     throw new Error(data.error || 'Authentication failed');
                 }
 
-                // Store token
-                localStorage.setItem('authToken', data.token);
-
-                // Redirect to main app (replace history to prevent back button issues)
-                window.location.replace('/');
-
+                if (data.requires2fa) {
+                    pendingTempToken = data.tempToken;
+                    showTotpStep();
+                } else {
+                    localStorage.setItem('authToken', data.token);
+                    window.location.replace('/');
+                }
             } catch (err) {
-                errorMessage.textContent = err.message;
-                errorMessage.classList.add('show');
+                showError(err.message);
+            } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = isSetupMode ? 'Create Account' : 'Sign In';
             }
+        });
+
+        // Handle 2FA form submission
+        document.getElementById('totp-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const code = document.getElementById('totp-code').value.trim();
+            const submitBtn = document.getElementById('totp-submit-btn');
+
+            clearError();
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Verifying...';
+
+            try {
+                const response = await fetch('/api/auth/2fa/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tempToken: pendingTempToken, code })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Verification failed');
+                }
+
+                localStorage.setItem('authToken', data.token);
+                window.location.replace('/');
+            } catch (err) {
+                showError(err.message);
+                document.getElementById('totp-code').value = '';
+                document.getElementById('totp-code').focus();
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Verify';
+            }
+        });
+
+        // Back button on 2FA step
+        document.getElementById('totp-back-btn').addEventListener('click', () => {
+            clearError();
+            showLoginStep();
         });
 
         // Check setup status on load
