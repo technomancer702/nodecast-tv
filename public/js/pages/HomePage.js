@@ -475,6 +475,7 @@ class HomePage {
                     subtitle: item.data.subtitle || (type === 'movie' ? 'Movie' : 'Series'),
                     poster: item.stream_icon || item.data.poster,
                     sourceId: sourceId,
+                    duration: item.duration,
                     resumeTime: isResume ? item.progress : 0,
                     containerExtension: container
                 };

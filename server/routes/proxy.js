@@ -740,23 +740,21 @@ router.get('/stream', async (req, res) => {
                 return res.send(manifest);
             }
 
-            // Binary content (Video Segment or Key): Collect and send
+            // Binary content (video files, segments, keys): stream straight through.
+            // Buffering an entire VOD file here delays playback start and defeats Range requests.
             console.log(`[Proxy] Serving binary content (${contentType})`);
             res.set('Content-Type', contentType || 'application/octet-stream');
 
-            // For small files (like encryption keys), collect all data and send at once
-            // This ensures proper Content-Length and response completion
-            const chunks = [firstChunk];
-            let result = await iterator.next();
-            while (!result.done) {
-                chunks.push(Buffer.from(result.value));
-                result = await iterator.next();
-            }
-            const fullContent = Buffer.concat(chunks);
+            const remainder = (async function* () {
+                yield firstChunk;
+                let result = await iterator.next();
+                while (!result.done) {
+                    yield Buffer.from(result.value);
+                    result = await iterator.next();
+                }
+            })();
 
-            // Set Content-Length for proper client handling
-            res.set('Content-Length', fullContent.length);
-            res.send(fullContent);
+            Readable.from(remainder).pipe(res);
             return; // Success - exit the retry loop
 
         } catch (err) {

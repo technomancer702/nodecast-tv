@@ -93,6 +93,7 @@ class WatchPage {
 
         // Watch history
         this.historyInterval = null;
+        this.totalDuration = 0;
 
         this.init();
     }
@@ -185,6 +186,7 @@ class WatchPage {
         // Video events
         this.video?.addEventListener('timeupdate', () => this.updateProgress());
         this.video?.addEventListener('loadedmetadata', () => this.onMetadataLoaded());
+        this.video?.addEventListener('durationchange', () => this.updateDurationDisplay());
         this.video?.addEventListener('play', () => this.onPlay());
         this.video?.addEventListener('pause', () => this.onPause());
         this.video?.addEventListener('ended', () => this.onEnded());
@@ -254,6 +256,9 @@ class WatchPage {
         this.resumeTime = content.resumeTime || 0;
         this.containerExtension = content.containerExtension || 'mp4';
         this.returnPage = content.type === 'movie' ? 'movies' : 'series';
+        this.totalDuration = 0;
+        this.setTotalDuration(this.parseDurationValue(content.duration));
+        this.updateProgressUI(0, 0);
 
         // Stop any Live TV playback before starting movie/series
         this.app?.player?.stop?.();
@@ -382,6 +387,15 @@ class WatchPage {
         this.transcodeStatusEx.classList.remove('hidden');
     }
 
+    async probeStreamInfo(url, settings = {}) {
+        const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
+        const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}`);
+        if (!probeRes.ok) {
+            throw new Error('Failed to probe stream');
+        }
+        return probeRes.json();
+    }
+
     /**
      * Get quality label from video height
      */
@@ -436,14 +450,13 @@ class WatchPage {
         if (settings.autoTranscode) {
             console.log('[WatchPage] Auto Transcode enabled. Probing stream...');
             try {
-                const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
-                const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}`);
-                const info = await probeRes.json();
+                const info = await this.probeStreamInfo(url, settings);
                 console.log(`[WatchPage] Probe result: video=${info.video}, audio=${info.audio}, ${info.width}x${info.height}, compatible=${info.compatible}`);
 
                 // Store early probe info for quality display
                 this.currentStreamInfo = info;
                 this.updateQualityBadge();
+                this.setTotalDuration(info.duration);
 
                 if (info.needsTranscode || settings.upscaleEnabled) {
                     console.log(`[WatchPage] Auto: Using HLS transcode session (${settings.upscaleEnabled ? 'Upscaling' : 'Incompatible audio/video'})`);
@@ -508,10 +521,9 @@ class WatchPage {
             // Probe to get video codec for HEVC tag handling
             let videoCodec = 'unknown';
             try {
-                const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
-                const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}`);
-                const info = await probeRes.json();
+                const info = await this.probeStreamInfo(url, settings);
                 videoCodec = info.video;
+                this.setTotalDuration(info.duration);
             } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
 
             const playlistUrl = await this.startTranscodeSession(url, {
@@ -635,6 +647,8 @@ class WatchPage {
             this.hls.destroy();
             this.hls = null;
         }
+        this.totalDuration = 0;
+        this.updateProgressUI(0, 0);
         if (this.video) {
             this.video.pause();
             this.video.src = '';
@@ -768,17 +782,17 @@ class WatchPage {
     // === UI Updates ===
 
     updateProgress() {
-        if (!this.video || !this.video.duration) return;
+        if (!this.video) return;
 
-        const percent = (this.video.currentTime / this.video.duration) * 100;
-        this.progressSlider.value = percent;
-        this.timeCurrent.textContent = this.formatTime(this.video.currentTime);
+        const duration = this.getEffectiveDuration();
+        this.updateProgressUI(this.video.currentTime, duration);
+
+        if (!duration) return;
 
         // Show "Up Next" panel early for series (like streaming services do during credits)
         // Only show if auto-play next episode is enabled
         const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
         if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing && !this.nextEpisodeDismissed) {
-            const duration = this.video.duration;
             const currentTime = this.video.currentTime;
 
             // Only proceed if we have reliable duration data
@@ -798,6 +812,8 @@ class WatchPage {
     }
 
     onMetadataLoaded() {
+        this.updateDurationDisplay();
+
         // Detect resolution
         if (this.video && this.video.videoHeight > 0) {
             this.currentStreamInfo = {
@@ -863,6 +879,67 @@ class WatchPage {
         const isMuted = this.video?.muted || this.video?.volume === 0;
         this.muteBtn?.querySelector('.icon-vol')?.classList.toggle('hidden', isMuted);
         this.muteBtn?.querySelector('.icon-muted')?.classList.toggle('hidden', !isMuted);
+    }
+
+    getEffectiveDuration() {
+        const mediaDuration = this.video?.duration;
+        if (Number.isFinite(mediaDuration) && mediaDuration > 0) {
+            return mediaDuration;
+        }
+        return this.totalDuration || 0;
+    }
+
+    setTotalDuration(duration) {
+        if (Number.isFinite(duration) && duration > 0) {
+            this.totalDuration = duration;
+            this.updateDurationDisplay();
+        }
+    }
+
+    parseDurationValue(value) {
+        if (typeof value === 'number') {
+            return Number.isFinite(value) && value > 0 ? value : 0;
+        }
+
+        if (typeof value !== 'string') {
+            return 0;
+        }
+
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return 0;
+        }
+
+        if (/^\d+(\.\d+)?$/.test(trimmed)) {
+            const numericValue = Number.parseFloat(trimmed);
+            return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : 0;
+        }
+
+        const parts = trimmed.split(':').map(part => Number.parseInt(part, 10));
+        if (parts.length >= 2 && parts.length <= 3 && parts.every(part => Number.isInteger(part) && part >= 0)) {
+            return parts.reduce((total, part) => (total * 60) + part, 0);
+        }
+
+        return 0;
+    }
+
+    updateDurationDisplay() {
+        if (this.timeTotal) {
+            this.timeTotal.textContent = this.formatTime(this.getEffectiveDuration());
+        }
+    }
+
+    updateProgressUI(currentTime, duration) {
+        if (this.timeCurrent) {
+            this.timeCurrent.textContent = this.formatTime(currentTime);
+        }
+
+        if (this.progressSlider) {
+            const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
+            this.progressSlider.value = percent;
+        }
+
+        this.updateDurationDisplay();
     }
 
     formatTime(seconds) {

@@ -87,6 +87,7 @@ function analyzeProbeResult(probeResult, url) {
     const videoCodec = videoStream?.codec_name?.toLowerCase() || 'unknown';
     const audioCodec = audioStream?.codec_name?.toLowerCase() || 'unknown';
     const container = format.format_name?.toLowerCase() || 'unknown';
+    const duration = Number.parseFloat(format.duration);
 
     // Check codec compatibility
     const videoOk = BROWSER_VIDEO_CODECS.some(c => videoCodec.includes(c));
@@ -130,6 +131,7 @@ function analyzeProbeResult(probeResult, url) {
         audio: audioCodec,
         width: videoStream?.width || 0,
         height: videoStream?.height || 0,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
         audioChannels: audioStream?.channels || 0, // For Smart Audio Copy
         container: container,
         compatible: compatible,

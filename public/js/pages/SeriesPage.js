@@ -448,6 +448,7 @@ class SeriesPage {
                         description: this.currentSeries?.plot || '',
                         year: this.currentSeries?.year,
                         rating: this.currentSeries?.rating,
+                        duration: episodeEl.querySelector('.episode-duration')?.textContent || '',
                         sourceId: sourceId,
                         seriesId: this.currentSeries?.series_id,
                         seriesInfo: this.currentSeriesInfo,

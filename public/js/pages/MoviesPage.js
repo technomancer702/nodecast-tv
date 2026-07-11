@@ -351,6 +351,7 @@ class MoviesPage {
                         description: movie.plot || '',
                         year: movie.year || movie.releaseDate?.substring(0, 4),
                         rating: movie.rating,
+                        duration: movie.duration || movie.run_time || movie.runtime || movie.duration_secs,
                         sourceId: movie.sourceId,
                         categoryId: movie.category_id,
                         containerExtension: container
