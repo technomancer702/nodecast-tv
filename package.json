@@ -12,6 +12,7 @@
         "@ffprobe-installer/ffprobe": "^2.1.2",
         "bcryptjs": "^3.0.3",
         "better-sqlite3": "^12.5.0",
+        "compression": "^1.8.1",
         "dotenv": "^17.2.3",
         "express": "^4.18.2",
         "express-session": "^1.18.2",

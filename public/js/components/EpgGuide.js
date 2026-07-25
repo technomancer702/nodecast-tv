@@ -15,6 +15,16 @@ class EpgGuide {
 
         this.channels = [];
         this.programmes = [];
+        // Set once the full +/-24h guide has been fetched. Until then `programmes` is
+        // empty and only `nowByChannel` is populated - callers that need a programme
+        // list (upcoming, guide grid) must check this rather than programmes.length.
+        this.fullEpgLoaded = false;
+        // channelId -> currently airing programme. Cheap to fetch, enough for the
+        // channel sidebar's "what's on now" line.
+        this.nowByChannel = new Map();
+        // channelId -> programme[], built from `programmes` so current-programme
+        // lookups don't linear-scan the whole guide once per channel row.
+        this.programmesByChannel = new Map();
         this.currentDate = new Date();
         this.timeOffset = 0; // Hours offset from now
         this.pixelsPerMinute = 6.67; // Width scaling (30min = 200px)
@@ -70,6 +80,17 @@ class EpgGuide {
 
         // Update current time indicator every minute
         setInterval(() => this.updateNowIndicator(), 60000);
+
+        // The background refresh skips hidden tabs, so catch up on the way back.
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden || !this._backgroundRefreshTimer) return;
+            this.fetchNowPlaying()
+                .then(() => {
+                    window.app?.channelList?.clearProgramInfoCache();
+                    window.app?.channelList?.updateVisibleEpgInfo?.();
+                })
+                .catch(() => { });
+        });
 
         this.initResizer();
     }
@@ -129,15 +150,20 @@ class EpgGuide {
         // Clear any existing timer
         this.stopBackgroundRefresh();
 
-        // Refresh display from cache every 5 minutes to pick up server-side sync results
+        // Refresh the *now playing* row set periodically to pick up server-side sync
+        // results. This used to re-fetch the entire +/-24h guide every 5 minutes,
+        // which on a large provider is a nine-figure byte count per hour, per tab,
+        // regardless of which page was open. Now-playing is a per-channel row set and
+        // is the only thing that actually changes minute to minute.
         const refreshIntervalMs = 5 * 60 * 1000; // 5 minutes
 
-        console.log('[EPG] Starting display refresh timer: every 5 minutes');
-
         this._backgroundRefreshTimer = setInterval(async () => {
-            console.log('[EPG] Refreshing EPG display from cache');
+            // Don't fetch for a tab nobody is looking at; the visibilitychange
+            // handler refreshes on the way back.
+            if (document.hidden) return;
+
             try {
-                await this.fetchEpgData(false); // Fetch cached data (no force refresh)
+                await this.fetchNowPlaying();
 
                 // Update channel list program info if visible
                 if (window.app?.channelList) {
@@ -171,10 +197,10 @@ class EpgGuide {
     /**
      * Load EPG data (server-side caching)
      */
-    async loadEpg(forceRefresh = false) {
+    async loadEpg() {
         try {
             this.container.innerHTML = '<div class="loading"></div>';
-            await this.fetchEpgData(forceRefresh);
+            await this.fetchEpgData();
             this.lastRefreshTime = new Date();
             this.render();
 
@@ -195,8 +221,57 @@ class EpgGuide {
     /**
      * Fetch EPG data from sources
      */
-    async fetchEpgData(forceRefresh = false) {
-        // Get ALL sources and filter for EPG-capable types
+    async fetchEpgData() {
+        const { channels, programmes } = await this._fetchFromSources(id => `/api/proxy/epg/${id}`);
+
+        this.channels = channels;
+        this.programmes = programmes;
+        this.fullEpgLoaded = true;
+
+        // channelId -> programmes, so getCurrentProgram() doesn't scan the whole guide
+        // once per rendered channel row.
+        this.programmesByChannel = new Map();
+        for (const p of programmes) {
+            let list = this.programmesByChannel.get(p.channelId);
+            if (!list) {
+                list = [];
+                this.programmesByChannel.set(p.channelId, list);
+            }
+            list.push(p);
+        }
+
+        this._indexChannels();
+        await this._loadFavourites();
+    }
+
+    /**
+     * Fetch only the currently-airing programme per channel.
+     * This is what the channel sidebar needs; it is a per-channel row set rather than
+     * the full +/-24h guide, so it is cheap enough to run at startup and on a timer.
+     */
+    async fetchNowPlaying() {
+        const { channels, programmes } = await this._fetchFromSources(id => `/api/proxy/epg/${id}/now`);
+
+        this.nowByChannel = new Map();
+        for (const p of programmes) {
+            // One row per channel expected; first wins if a provider overlaps them.
+            if (!this.nowByChannel.has(p.channelId)) {
+                this.nowByChannel.set(p.channelId, p);
+            }
+        }
+
+        // Only seed the channel list if the full guide hasn't already provided one.
+        if (!this.fullEpgLoaded) {
+            this.channels = channels;
+            this._indexChannels();
+            await this._loadFavourites();
+        }
+    }
+
+    /**
+     * Shared fetch/merge for the EPG endpoints. Returns merged channels + programmes.
+     */
+    async _fetchFromSources(urlFor) {
         const allSources = await API.sources.getAll();
         const sources = allSources.filter(s => (s.type === 'epg' || s.type === 'xtream') && s.enabled);
 
@@ -204,51 +279,37 @@ class EpgGuide {
             throw new Error('No EPG sources or Xtream accounts configured');
         }
 
-        // Build query params for server-side caching
-        // Sync interval is controlled by server, we just hint at max cache age
-        const maxAge = 24; // hours - server controls actual refresh
-        const queryParams = forceRefresh ? '?refresh=1' : `?maxAge=${maxAge}`;
-
-        // Load EPG from ALL sources in parallel
-        const fetchPromises = sources.map(async (source) => {
+        const results = await Promise.all(sources.map(async (source) => {
             try {
-                const response = await fetch(`/api/proxy/epg/${source.id}${queryParams}`);
+                const response = await fetch(urlFor(source.id));
                 if (!response.ok) throw new Error(`Status ${response.status}`);
                 return await response.json();
             } catch (e) {
                 console.warn(`Failed to load EPG for source ${source.name}:`, e);
                 return null;
             }
-        });
+        }));
 
-        const results = await Promise.all(fetchPromises);
-
-        // Merge results
-        this.channels = [];
-        this.programmes = [];
-
+        const channels = [];
+        const programmes = [];
         let hasData = false;
-        results.forEach(data => {
-            if (data) {
-                if (data.channels && data.channels.length > 0) {
-                    this.channels = this.channels.concat(data.channels);
-                }
-                if (data.programmes && data.programmes.length > 0) {
-                    this.programmes = this.programmes.concat(data.programmes);
-                }
-                if (data.channels || data.programmes) {
-                    hasData = true;
-                }
-            }
-        });
+
+        for (const data of results) {
+            if (!data) continue;
+            if (data.channels?.length) channels.push(...data.channels);
+            if (data.programmes?.length) programmes.push(...data.programmes);
+            if (data.channels || data.programmes) hasData = true;
+        }
 
         if (!hasData) {
             throw new Error('Failed to load EPG data from any source');
         }
 
-        // Build secondary indexes for faster lookup
+        return { channels, programmes };
+    }
+
+    _indexChannels() {
         this.channelMap = new Map();
-        // Index by ID
         this.channels.forEach(ch => {
             this.channelMap.set(ch.id, ch);
             // Also index by name (normalized) for fallback matching
@@ -256,8 +317,9 @@ class EpgGuide {
                 this.channelMap.set(ch.name.toLowerCase(), ch);
             }
         });
+    }
 
-        // Load favorites
+    async _loadFavourites() {
         const favs = await API.favorites.getAll();
         this.favorites = new Set(favs.map(f => `${f.source_id}:${f.item_id}`));
     }
@@ -269,7 +331,7 @@ class EpgGuide {
      * @returns {object|null} Program object with title, start, stop
      */
     getCurrentProgram(tvgId, channelName) {
-        if (!this.programmes || this.programmes.length === 0) return null;
+        if (!this.fullEpgLoaded && this.nowByChannel.size === 0) return null;
 
         // Find EPG channel using fast map lookup
         let epgChannel = null;
@@ -286,16 +348,26 @@ class EpgGuide {
 
         if (!epgChannel) return null;
 
-        const now = new Date();
-        const nowTime = now.getTime();
+        const nowTime = Date.now();
 
-        // Filter programs for this channel
-        const current = this.programmes.find(p => {
-            if (p.channelId !== epgChannel.id) return false;
-            const start = new Date(p.start).getTime();
-            const stop = new Date(p.stop).getTime();
-            return nowTime >= start && nowTime < stop;
-        });
+        // Prefer the full guide when it's loaded, via the per-channel index - scanning
+        // all programmes here was O(programmes) for every rendered channel row.
+        let current = null;
+        if (this.fullEpgLoaded) {
+            const forChannel = this.programmesByChannel.get(epgChannel.id);
+            current = forChannel?.find(p => {
+                const start = new Date(p.start).getTime();
+                const stop = new Date(p.stop).getTime();
+                return nowTime >= start && nowTime < stop;
+            }) || null;
+        } else {
+            // Sidebar-only data: already exactly one currently-airing row per channel,
+            // but it can go stale between refreshes, so still bounds-check it.
+            const p = this.nowByChannel.get(epgChannel.id);
+            if (p && nowTime >= new Date(p.start).getTime() && nowTime < new Date(p.stop).getTime()) {
+                current = p;
+            }
+        }
 
         return current ? {
             title: current.title,
@@ -893,8 +965,10 @@ class EpgGuide {
 
         title.textContent = data.title || 'Program Details';
 
-        const start = new Date(data.start);
-        const stop = new Date(data.stop);
+        // `data` is a DOMStringMap - the epoch ms in data-start/data-stop arrive here
+        // as strings, and new Date("1721900000000") is an Invalid Date. Coerce first.
+        const start = new Date(Number(data.start));
+        const stop = new Date(Number(data.stop));
 
         body.innerHTML = `
       <p><strong>Time:</strong> ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>

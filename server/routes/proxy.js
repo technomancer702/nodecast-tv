@@ -326,9 +326,14 @@ router.get('/epg/:sourceId', async (req, res) => {
         const windowEnd = Date.now() + (24 * 60 * 60 * 1000);   // +24 hours
 
         // Fetch programs within the time window
+        // `data` is deliberately not selected - nothing on the client reads it, and it
+        // is the largest column in the table.
+        // start/stop go out as epoch ms rather than ISO strings: it drops two
+        // Date allocations + toISOString() per row, and shortens the payload.
+        // Every client parse site goes through `new Date(...)`, which accepts both.
         let programsQuery = `
-            SELECT channel_id as channelId, start_time, end_time, title, description, data 
-            FROM epg_programs 
+            SELECT channel_id as channelId, start_time, end_time, title, description
+            FROM epg_programs
             WHERE source_id = ? AND end_time > ? AND start_time < ?
         `;
         const params = [sourceId, windowStart, windowEnd];
@@ -337,8 +342,8 @@ router.get('/epg/:sourceId', async (req, res) => {
 
         const formattedPrograms = programs.map(p => ({
             channelId: p.channelId,
-            start: new Date(p.start_time).toISOString(), // EpgGuide parse this back
-            stop: new Date(p.end_time).toISOString(),
+            start: p.start_time,
+            stop: p.end_time,
             title: p.title,
             description: p.description
         }));
@@ -377,9 +382,68 @@ router.get('/epg/:sourceId', async (req, res) => {
     }
 });
 
+// Currently-airing programme only, one row per channel.
+// The channel sidebar only ever renders "what's on now", which previously cost it the
+// full +/-24h guide (hundreds of thousands of rows). This serves the same need from
+// roughly one row per channel. The full /epg/:sourceId payload is for the Guide page.
+router.get('/epg/:sourceId/now', (req, res) => {
+    try {
+        const sourceId = parseInt(req.params.sourceId);
+        if (Number.isNaN(sourceId)) {
+            return res.status(400).json({ error: 'Invalid source id' });
+        }
+
+        const db = getDb();
+        const now = Date.now();
+
+        // Served entirely from idx_epg_source_start as a covering index, so `description`
+        // is deliberately not selected - including it forces a table lookup per row and
+        // costs two orders of magnitude. The sidebar only renders the title.
+        //
+        // The start_time lower bound is what makes the index range small: without it
+        // SQLite walks every programme this source has ever had up to now (~1400x
+        // slower measured). A programme that started earlier than this and is still
+        // running will be missed, so the bound is set well past any real programme
+        // length - providers do emit multi-day "Program" placeholder entries.
+        const MAX_PROGRAMME_MS = 48 * 60 * 60 * 1000;
+        const programs = db.prepare(`
+            SELECT channel_id as channelId, start_time, end_time, title
+            FROM epg_programs
+            WHERE source_id = ? AND start_time > ? AND start_time <= ? AND end_time > ?
+        `).all(sourceId, now - MAX_PROGRAMME_MS, now, now);
+
+        const channels = db.prepare(`
+            SELECT item_id as id, name, stream_icon as icon
+            FROM playlist_items
+            WHERE source_id = ? AND type = 'epg_channel'
+        `).all(sourceId);
+
+        res.json({
+            channels: channels.length > 0
+                ? channels
+                : [...new Set(programs.map(p => p.channelId))].map(id => ({ id, name: id })),
+            programmes: programs.map(p => ({
+                channelId: p.channelId,
+                start: p.start_time,
+                stop: p.end_time,
+                title: p.title
+            }))
+        });
+    } catch (err) {
+        console.error('EPG now-playing error:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
 // Clear cache (kept for compatibility)
 router.delete('/cache/:sourceId', (req, res) => {
-    const sourceId = req.params.sourceId;
+    // Source ids are always numeric. Anything else is a path-traversal attempt
+    // against the recursive delete in cache.clearSource().
+    const sourceId = parseInt(req.params.sourceId, 10);
+    if (Number.isNaN(sourceId)) {
+        return res.status(400).json({ error: 'Invalid source id' });
+    }
+
     cache.clearSource(sourceId);
     res.json({ success: true });
 });
@@ -495,61 +559,14 @@ router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
     }
 });
 
-/**
- * Fetch and parse EPG (with file-based caching)
- * GET /api/proxy/epg/:sourceId
- * Query params:
- *   - refresh=1  Force refresh, bypass cache
- *   - maxAge=N   Max cache age in hours (default 24)
- */
-router.get('/epg/:sourceId', async (req, res) => {
-    try {
-        const sourceId = req.params.sourceId;
-        const source = await sources.getById(sourceId);
-        if (!source || (source.type !== 'epg' && source.type !== 'xtream')) {
-            return res.status(404).json({ error: 'Valid EPG source not found' });
-        }
-
-        const forceRefresh = req.query.refresh === '1';
-        const maxAgeHours = parseInt(req.query.maxAge) || DEFAULT_MAX_AGE_HOURS;
-        const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
-
-        // Check file cache (unless force refresh)
-        if (!forceRefresh) {
-            const cached = cache.get('epg', sourceId, 'data', maxAgeMs);
-            if (cached) {
-                return res.json(cached);
-            }
-        }
-
-        // Fetch fresh data
-        let url = source.url;
-        if (source.type === 'xtream') {
-            const api = xtreamApi.createFromSource(source);
-            url = api.getXmltvUrl();
-        }
-
-        const data = await epgParser.fetchAndParse(url);
-
-        // Store in file cache
-        cache.set('epg', sourceId, 'data', data);
-
-        res.json(data);
-    } catch (err) {
-        console.error('EPG proxy error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * Clear cache for a source
- * DELETE /api/proxy/cache/:sourceId
- */
-router.delete('/cache/:sourceId', (req, res) => {
-    const sourceId = req.params.sourceId;
-    cache.clearSource(sourceId);
-    res.json({ success: true });
-});
+// Removed: a second `GET /epg/:sourceId` and a second `DELETE /cache/:sourceId`
+// lived here. Express is first-match-wins, so both were shadowed by the handlers
+// earlier in this file and had never run. The dead EPG copy went upstream to the
+// provider and implemented ?refresh=1 / ?maxAge=N, which is why those query params
+// appeared to do nothing - the live handler at the top reads from SQLite and ignores
+// them. Callers have been updated to stop sending them.
+// Note there is still a shadowed `GET /xtream/:sourceId/stream/:streamId/:type?`
+// above; left alone here as it is not part of this change.
 
 /**
  * Clear EPG cache for a source (legacy endpoint, calls clearSource)

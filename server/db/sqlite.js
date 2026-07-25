@@ -88,6 +88,11 @@ function initSchema() {
         );
         CREATE INDEX IF NOT EXISTS idx_epg_channel_time ON epg_programs(channel_id, start_time, end_time);
         CREATE INDEX IF NOT EXISTS idx_epg_cleanup ON epg_programs(end_time); -- For deleting old programs
+        -- Per-source time-window reads. The trailing columns make this a COVERING
+        -- index for the now-playing query (which selects no description), taking it
+        -- from ~10s to <100ms at 1.5M rows by removing the per-row table lookup.
+        -- The (source_id, start_time) prefix also serves the full guide query.
+        CREATE INDEX IF NOT EXISTS idx_epg_source_start ON epg_programs(source_id, start_time, end_time, channel_id, title);
     `);
 
     // Sync Status
