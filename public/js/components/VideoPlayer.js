@@ -1268,8 +1268,11 @@ class VideoPlayer {
             return;
         }
         try {
-            // First, try to use the centralized EpgGuide data (already loaded)
-            if (window.app && window.app.epgGuide && window.app.epgGuide.programmes) {
+            // First, try to use the centralized EpgGuide data, but only when the full
+            // guide is loaded - the startup now-playing set has no upcoming programmes,
+            // so without this we'd short-circuit the short_epg fallback below and lose
+            // the "up next" list.
+            if (window.app?.epgGuide?.fullEpgLoaded) {
                 const epgGuide = window.app.epgGuide;
 
                 // Get current program from EpgGuide

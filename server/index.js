@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', true);
 
 // Middleware
+// gzip all responses. The catalogue/EPG JSON payloads are tens of MB uncompressed
+// and compress ~20x, so this dominates wall-clock time on every browse request.
+app.use(require('compression')());
 app.use(express.json({ limit: '50mb' }));
 
 // Initialize Passport
