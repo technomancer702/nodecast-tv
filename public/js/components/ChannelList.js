@@ -665,6 +665,7 @@ class ChannelList {
             this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
 
             const xtreamSources = this.sources.filter(s => s.type === 'xtream' && s.enabled);
+            const stalkerSources = this.sources.filter(s => s.type === 'stalker' && s.enabled);
             const m3uSources = this.sources.filter(s => s.type === 'm3u' && s.enabled);
 
             if (xtreamSources.length > 0) {
@@ -673,6 +674,18 @@ class ChannelList {
                 xtreamSources.forEach(s => {
                     const option = document.createElement('option');
                     option.value = `xtream:${s.id}`;
+                    option.textContent = s.name;
+                    optgroup.appendChild(option);
+                });
+                this.sourceSelect.appendChild(optgroup);
+            }
+
+            if (stalkerSources.length > 0) {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = 'Stalker Portal';
+                stalkerSources.forEach(s => {
+                    const option = document.createElement('option');
+                    option.value = `stalker:${s.id}`;
                     option.textContent = s.name;
                     optgroup.appendChild(option);
                 });
@@ -720,6 +733,8 @@ class ChannelList {
 
             if (type === 'xtream') {
                 await this.loadXtreamChannels(parseInt(id));
+            } else if (type === 'stalker') {
+                await this.loadStalkerChannels(parseInt(id));
             } else if (type === 'm3u') {
                 await this.loadM3uChannels(parseInt(id));
             }
@@ -750,11 +765,16 @@ class ChannelList {
             this.container.innerHTML = '<div class="loading"></div>';
 
             const xtreamSources = this.sources.filter(s => s.type === 'xtream' && s.enabled);
+            const stalkerSources = this.sources.filter(s => s.type === 'stalker' && s.enabled);
             const m3uSources = this.sources.filter(s => s.type === 'm3u' && s.enabled);
-            console.log('[ChannelList] loadAllChannels: xtream=', xtreamSources.length, 'm3u=', m3uSources.length);
+            console.log('[ChannelList] loadAllChannels: xtream=', xtreamSources.length, 'stalker=', stalkerSources.length, 'm3u=', m3uSources.length);
 
             for (const source of xtreamSources) {
                 await this.loadXtreamChannels(source.id, true);
+            }
+
+            for (const source of stalkerSources) {
+                await this.loadStalkerChannels(source.id, true);
             }
 
             for (const source of m3uSources) {
@@ -805,6 +825,45 @@ class ChannelList {
             groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
             sourceId,
             sourceType: 'xtream'
+        }));
+
+        this.channels = this.channels.concat(channelList);
+    }
+
+    /**
+     * Load Stalker Portal channels
+     * Uses unified Xtream-style API endpoints (backend syncs Stalker data into the same DB tables)
+     */
+    async loadStalkerChannels(sourceId, append = false) {
+        if (!append) {
+            this.channels = [];
+            this.groups = [];
+        }
+
+        const categories = await API.proxy.xtream.liveCategories(sourceId);
+        const streams = await API.proxy.xtream.liveStreams(sourceId);
+
+        // Map categories to groups
+        const categoryGroups = categories.map(cat => ({
+            id: `stalker_${sourceId}_${cat.category_id}`,
+            name: cat.category_name,
+            sourceId,
+            sourceType: 'stalker'
+        }));
+
+        this.groups = this.groups.concat(categoryGroups);
+
+        // Map streams to channels
+        const channelList = streams.map(stream => ({
+            id: `stalker_${sourceId}_${stream.stream_id}`,
+            streamId: stream.stream_id,
+            name: stream.name,
+            tvgId: stream.epg_channel_id,
+            tvgLogo: stream.stream_icon,
+            groupId: `stalker_${sourceId}_${stream.category_id}`,
+            groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
+            sourceId,
+            sourceType: 'stalker'
         }));
 
         this.channels = this.channels.concat(channelList);
@@ -1161,6 +1220,9 @@ class ChannelList {
             // Get stream format from player settings (server-side) or fallback
             const streamFormat = window.app?.player?.settings?.streamFormat || 'm3u8';
             const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', streamFormat);
+            streamUrl = result.url;
+        } else if (channel.sourceType === 'stalker') {
+            const result = await API.proxy.stalker.getStreamUrl(channel.sourceId, channel.streamId);
             streamUrl = result.url;
         } else {
             streamUrl = channel.url;

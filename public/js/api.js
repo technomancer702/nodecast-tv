@@ -140,6 +140,11 @@ const API = {
                 API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?container=${container}`)
         },
 
+        // Stalker Portal
+        stalker: {
+            getStreamUrl: (sourceId, streamId) => API.request('GET', `/proxy/stalker/${sourceId}/stream/${streamId}`)
+        },
+
         // EPG
         epg: {
             get: (sourceId) => API.request('GET', `/proxy/epg/${sourceId}`),

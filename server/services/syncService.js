@@ -1,6 +1,7 @@
 const { getDb } = require('../db/sqlite');
 const { sources, settings } = require('../db'); // For source config and settings
 const xtreamApi = require('./xtreamApi');
+const stalkerApi = require('./stalkerApi');
 const m3uParser = require('./m3uParser');
 const epgParser = require('./epgParser');
 
@@ -138,6 +139,8 @@ class SyncService {
                 await this.syncM3u(source);
             } else if (source.type === 'epg') {
                 await this.syncEpg(source);
+            } else if (source.type === 'stalker') {
+                await this.syncStalker(source);
             }
 
             this.updateSyncStatus(sourceId, 'all', 'success');
@@ -560,6 +563,45 @@ class SyncService {
 
         await this.saveCategories(source.id, 'live', categories);
         console.log(`[Sync] M3U sync complete for ${source.name}`);
+    }
+
+    /**
+     * Stalker Portal Sync Logic (MAC-based live TV)
+     */
+    async syncStalker(source) {
+        console.log(`[Sync] Fetching Stalker Portal data for ${source.name}`);
+
+        const api = stalkerApi.createFromSource(source);
+        await api.authenticate();
+
+        // Persist the detected portal path so future syncs skip auto-detection
+        if (api.portalPath && api.portalPath !== source.portalPath) {
+            await sources.update(source.id, { portalPath: api.portalPath });
+        }
+
+        // 1. Genres (Categories)
+        console.log(`[Sync] Fetching Genres for ${source.name}`);
+        const genres = await api.getGenres();
+        const categories = genres
+            .filter(g => g && g.id !== undefined && g.id !== '*')
+            .map(g => ({ category_id: g.id, category_name: g.title || `Category ${g.id}`, parent_id: null }));
+        await this.saveCategories(source.id, 'live', categories);
+
+        // 2. Channels
+        console.log(`[Sync] Fetching Channels for ${source.name}`);
+        const channels = await api.getAllChannels();
+        const items = channels.map(ch => ({
+            stream_id: ch.id,
+            name: ch.name || `Channel ${ch.id}`,
+            category_id: ch.tv_genre_id || ch.genre_id,
+            stream_icon: ch.logo,
+            cmd: ch.cmd,
+            epg_channel_id: ch.xmltv_id || null,
+            added: null
+        }));
+        await this.saveStreams(source.id, 'live', items);
+
+        console.log(`[Sync] Stalker sync complete for ${source.name}: ${categories.length} categories, ${items.length} channels`);
     }
 
     /**

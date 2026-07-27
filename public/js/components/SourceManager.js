@@ -6,6 +6,7 @@
 class SourceManager {
     constructor() {
         this.xtreamList = document.getElementById('xtream-list');
+        this.stalkerList = document.getElementById('stalker-list');
         this.m3uList = document.getElementById('m3u-list');
         this.epgList = document.getElementById('epg-list');
 
@@ -23,6 +24,7 @@ class SourceManager {
     init() {
         // Add source buttons
         document.getElementById('add-xtream').addEventListener('click', () => this.showAddModal('xtream'));
+        document.getElementById('add-stalker').addEventListener('click', () => this.showAddModal('stalker'));
         document.getElementById('add-m3u').addEventListener('click', () => this.showAddModal('m3u'));
         document.getElementById('add-epg').addEventListener('click', () => this.showAddModal('epg'));
 
@@ -113,6 +115,7 @@ class SourceManager {
             const sources = await API.sources.getAll();
 
             this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
+            this.renderSourceList(this.stalkerList, sources.filter(s => s.type === 'stalker'), 'stalker');
             this.renderSourceList(this.m3uList, sources.filter(s => s.type === 'm3u'), 'm3u');
             this.renderSourceList(this.epgList, sources.filter(s => s.type === 'epg'), 'epg');
         } catch (err) {
@@ -129,14 +132,14 @@ class SourceManager {
             return;
         }
 
-        const icons = { xtream: Icons.live, m3u: Icons.guide, epg: Icons.series };
+        const icons = { xtream: Icons.live, stalker: Icons.fingerprint, m3u: Icons.guide, epg: Icons.series };
 
         container.innerHTML = sources.map(source => `
       <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
           <div class="source-name">${source.name}</div>
-          <div class="source-url">${source.url}</div>
+          <div class="source-url">${source.url}${source.mac ? ` &middot; ${source.mac}` : ''}</div>
         </div>
         <div class="source-actions">
           <button class="btn btn-sm btn-secondary" data-action="refresh" title="Refresh Data">${Icons.refresh}</button>
@@ -171,10 +174,11 @@ class SourceManager {
         const body = document.getElementById('modal-body');
         const footer = document.getElementById('modal-footer');
 
-        const titles = { xtream: 'Add Xtream Connection', m3u: 'Add M3U Playlist', epg: 'Add EPG Source' };
+        const titles = { xtream: 'Add Xtream Connection', stalker: 'Add Stalker Portal', m3u: 'Add M3U Playlist', epg: 'Add EPG Source' };
         title.textContent = titles[type];
 
         body.innerHTML = this.getSourceForm(type);
+        this.attachMacGenerator();
 
         footer.innerHTML = `
       <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -203,6 +207,7 @@ class SourceManager {
 
             title.textContent = `Edit ${type.toUpperCase()} Source`;
             body.innerHTML = this.getSourceForm(type, source);
+            this.attachMacGenerator();
 
             footer.innerHTML = `
         <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -232,9 +237,9 @@ class SourceManager {
 
         const urlField = `
       <div class="form-group">
-        <label for="source-url">${type === 'xtream' ? 'Server URL' : 'URL'}</label>
-        <input type="text" id="source-url" class="form-input" 
-               placeholder="${type === 'xtream' ? 'http://server.com:port' : 'https://example.com/playlist.m3u'}" 
+        <label for="source-url">${type === 'xtream' || type === 'stalker' ? 'Portal URL' : 'URL'}</label>
+        <input type="text" id="source-url" class="form-input"
+               placeholder="${type === 'xtream' || type === 'stalker' ? 'http://server.com:port' : 'https://example.com/playlist.m3u'}"
                value="${source.url || ''}">
       </div>
     `;
@@ -249,13 +254,51 @@ class SourceManager {
         </div>
         <div class="form-group">
           <label for="source-password">Password</label>
-          <input type="password" id="source-password" class="form-input" 
+          <input type="password" id="source-password" class="form-input"
                  value="${source.password && !source.password.includes('•') ? source.password : ''}">
         </div>
       `;
         }
 
+        if (type === 'stalker') {
+            return `
+        ${nameField}
+        ${urlField}
+        <div class="form-group">
+          <label for="source-mac">MAC Address</label>
+          <div style="display:flex; gap: var(--space-sm);">
+            <input type="text" id="source-mac" class="form-input" placeholder="00:1A:79:XX:XX:XX"
+                   value="${source.mac || ''}" style="flex:1;">
+            <button type="button" class="btn btn-secondary" id="generate-mac">Generate</button>
+          </div>
+          <p class="hint">The MAC address registered with your Stalker Portal provider.</p>
+        </div>
+      `;
+        }
+
         return nameField + urlField;
+    }
+
+    /**
+     * Generate a random MAC address using a common STB vendor OUI prefix
+     */
+    generateMac() {
+        const oui = [0x00, 0x1A, 0x79]; // Infomir (common MAG STB vendor) OUI
+        const rest = [0, 0, 0].map(() => Math.floor(Math.random() * 256));
+        return [...oui, ...rest].map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
+    }
+
+    /**
+     * Attach the "Generate" MAC button listener, if present in the current modal
+     */
+    attachMacGenerator() {
+        const btn = document.getElementById('generate-mac');
+        const input = document.getElementById('source-mac');
+        if (btn && input) {
+            btn.addEventListener('click', () => {
+                input.value = this.generateMac();
+            });
+        }
     }
 
     /**
@@ -266,9 +309,15 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim() || null;
         const password = document.getElementById('source-password')?.value.trim() || null;
+        const mac = document.getElementById('source-mac')?.value.trim().toUpperCase() || null;
 
         if (!name || !url) {
             alert('Name and URL are required');
+            return;
+        }
+
+        if (type === 'stalker' && (!mac || !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac))) {
+            alert('A valid MAC address (XX:XX:XX:XX:XX:XX) is required');
             return;
         }
 
@@ -295,7 +344,7 @@ class SourceManager {
                 }
             }
 
-            await API.sources.create({ type, name, url, username, password });
+            await API.sources.create({ type, name, url, username, password, mac });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
 
@@ -317,9 +366,15 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim();
         const password = document.getElementById('source-password')?.value.trim();
+        const mac = document.getElementById('source-mac')?.value.trim().toUpperCase();
 
         if (!name || !url) {
             alert('Name and URL are required');
+            return;
+        }
+
+        if (type === 'stalker' && mac && !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) {
+            alert('A valid MAC address (XX:XX:XX:XX:XX:XX) is required');
             return;
         }
 
@@ -328,6 +383,9 @@ class SourceManager {
             if (type === 'xtream') {
                 data.username = username;
                 if (password) data.password = password;
+            }
+            if (type === 'stalker' && mac) {
+                data.mac = mac;
             }
 
             await API.sources.update(id, data);
@@ -475,6 +533,12 @@ class SourceManager {
                     await window.app.channelList.loadChannels();
                 }
                 alert('M3U playlist synced & refreshed!');
+            } else if (type === 'stalker') {
+                // Re-fetch Stalker Portal data by reloading channels
+                if (window.app?.channelList) {
+                    await window.app.channelList.loadChannels();
+                }
+                alert('Stalker Portal data synced & refreshed!');
             }
 
             if (btn) {
@@ -584,7 +648,7 @@ class SourceManager {
             // Keep the placeholder option
             select.innerHTML = '<option value="">Select a source...</option>';
 
-            sources.filter(s => s.type === 'xtream' || s.type === 'm3u').forEach(source => {
+            sources.filter(s => s.type === 'xtream' || s.type === 'm3u' || s.type === 'stalker').forEach(source => {
                 select.innerHTML += `<option value="${source.id}">${source.name} (${source.type})</option>`;
             });
         } catch (err) {
@@ -612,7 +676,7 @@ class SourceManager {
 
             let categoryMap = {};
 
-            if (source.type === 'xtream' || source.type === 'm3u') {
+            if (source.type === 'xtream' || source.type === 'm3u' || source.type === 'stalker') {
                 // Use unified Xtream API endpoints - backend supports both source types
                 // Use includeHidden to show ALL items in the content manager
                 const categories = await API.proxy.xtream.liveCategories(sourceId, { includeHidden: true });
