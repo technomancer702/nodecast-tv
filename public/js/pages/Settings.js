@@ -25,6 +25,7 @@ class SettingsPage {
 
         // User management (admin only)
         this.initUserManagement();
+
     }
 
     initPlayerSettings() {
@@ -345,7 +346,7 @@ class SettingsPage {
             this.users = users;
 
             if (users.length === 0) {
-                userList.innerHTML = '<tr><td colspan="5" class="hint">No users found</td></tr>';
+                userList.innerHTML = '<tr><td colspan="6" class="hint">No users found</td></tr>';
                 return;
             }
 
@@ -359,6 +360,10 @@ class SettingsPage {
                     ? '<span class="user-badge user-badge-admin">Admin</span>'
                     : '<span class="user-badge user-badge-viewer">Viewer</span>';
 
+                const totpBadge = user.totpEnabled
+                    ? '<span class="user-badge user-badge-admin" style="font-size:11px;">On</span>'
+                    : '<span class="user-badge" style="font-size:11px;opacity:0.5;">Off</span>';
+
                 return `
                 <tr>
                     <td>
@@ -369,6 +374,7 @@ class SettingsPage {
                     </td>
                     <td>${user.email || '<span class="hint">-</span>'}</td>
                     <td>${roleBadge}</td>
+                    <td>${totpBadge}</td>
                     <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
                     <td>
                         <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
@@ -448,6 +454,25 @@ class SettingsPage {
             modal.classList.add('active');
             console.log('Modal classes after add:', modal.classList.toString());
 
+            // Load 2FA status for this user
+            this.loadUserTotpStatus(user.id);
+
+            // Wire up 2FA buttons for this user (replace old handlers each open)
+            const btnSetup = document.getElementById('btn-edit-totp-setup');
+            const btnDisable = document.getElementById('btn-edit-totp-disable');
+            const btnConfirm = document.getElementById('btn-edit-totp-confirm');
+            const btnCancel = document.getElementById('btn-edit-totp-cancel');
+
+            const btnReset = document.getElementById('btn-edit-totp-reset');
+            const btnResetClose = document.getElementById('btn-edit-totp-reset-close');
+
+            btnSetup.onclick = () => this.startUserTotpSetup(user.id);
+            btnReset.onclick = () => this.resetUserTotp(user.id);
+            btnResetClose.onclick = () => this.closeResetTotpUI();
+            btnDisable.onclick = () => this.disableUserTotp(user.id);
+            btnConfirm.onclick = () => this.confirmUserTotpEnable(user.id);
+            btnCancel.onclick = () => this.resetTotpSetupUI();
+
             // Setup Close/Cancel handlers (once)
             this.setupModalHandlers(modal);
             console.log('Modal should now be visible!');
@@ -518,20 +543,18 @@ class SettingsPage {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
 
-        // Load content browser when switching to that tab
         if (tabName === 'content') {
             this.app.sourceManager.loadContentSources();
         }
 
-        // Load users when switching to users tab
         if (tabName === 'users') {
             this.loadUsers();
         }
 
-        // Load hardware info when switching to transcode tab
         if (tabName === 'transcode') {
             this.loadHardwareInfo();
         }
+
     }
 
     async show() {
@@ -638,6 +661,131 @@ class SettingsPage {
             console.error('Error fetching sync status:', err);
             display.textContent = 'Unknown';
             display.title = 'Could not fetch sync status';
+        }
+    }
+
+    async loadUserTotpStatus(userId) {
+        const badge = document.getElementById('edit-totp-badge');
+        const btnSetup = document.getElementById('btn-edit-totp-setup');
+        const btnReset = document.getElementById('btn-edit-totp-reset');
+        const btnDisable = document.getElementById('btn-edit-totp-disable');
+
+        this.resetTotpSetupUI();
+        this.closeResetTotpUI();
+
+        try {
+            const { totpEnabled } = await API.auth.totp.adminStatus(userId);
+
+            if (totpEnabled) {
+                badge.textContent = 'Enabled';
+                badge.className = 'user-badge user-badge-admin';
+                btnSetup.style.display = 'none';
+                btnReset.style.display = 'inline-flex';
+                btnDisable.style.display = 'inline-flex';
+            } else {
+                badge.textContent = 'Disabled';
+                badge.className = 'user-badge user-badge-viewer';
+                btnSetup.style.display = 'inline-flex';
+                btnReset.style.display = 'none';
+                btnDisable.style.display = 'none';
+            }
+        } catch (err) {
+            badge.textContent = '';
+            btnSetup.style.display = 'none';
+            btnReset.style.display = 'none';
+            btnDisable.style.display = 'none';
+        }
+    }
+
+    resetTotpSetupUI() {
+        document.getElementById('edit-totp-setup').style.display = 'none';
+        document.getElementById('edit-totp-recovery').style.display = 'none';
+        document.getElementById('edit-totp-code').value = '';
+        document.getElementById('edit-totp-error').style.display = 'none';
+        document.getElementById('edit-totp-actions').style.display = 'flex';
+    }
+
+    closeResetTotpUI() {
+        document.getElementById('edit-totp-reset').style.display = 'none';
+        document.getElementById('edit-totp-actions').style.display = 'flex';
+    }
+
+    async resetUserTotp(userId) {
+        if (!confirm('This will immediately invalidate the current 2FA secret. The user will need to re-enroll. Continue?')) return;
+
+        document.getElementById('edit-totp-actions').style.display = 'none';
+
+        try {
+            const { qrDataUrl } = await API.auth.totp.adminReset(userId);
+            document.getElementById('edit-totp-reset-qr').src = qrDataUrl;
+            document.getElementById('edit-totp-reset').style.display = 'block';
+            await this.loadUserTotpStatus(userId);
+        } catch (err) {
+            document.getElementById('edit-totp-actions').style.display = 'flex';
+            alert('Error resetting 2FA: ' + err.message);
+        }
+    }
+
+    async startUserTotpSetup(userId) {
+        const errorEl = document.getElementById('edit-totp-error');
+        errorEl.style.display = 'none';
+
+        try {
+            const { qrDataUrl, secret } = await API.auth.totp.adminSetup(userId);
+            document.getElementById('edit-totp-qr').src = qrDataUrl;
+            document.getElementById('edit-totp-secret').textContent = secret;
+            document.getElementById('edit-totp-setup').style.display = 'block';
+            document.getElementById('edit-totp-actions').style.display = 'none';
+            document.getElementById('edit-totp-code').focus();
+        } catch (err) {
+            errorEl.textContent = err.message;
+            errorEl.style.display = 'block';
+        }
+    }
+
+    async confirmUserTotpEnable(userId) {
+        const code = document.getElementById('edit-totp-code').value.trim();
+        const errorEl = document.getElementById('edit-totp-error');
+        const btn = document.getElementById('btn-edit-totp-confirm');
+
+        errorEl.style.display = 'none';
+        btn.disabled = true;
+        btn.textContent = 'Enabling...';
+
+        try {
+            const result = await API.auth.totp.adminEnable(userId, code);
+
+            // Hide setup panel, show recovery codes
+            document.getElementById('edit-totp-setup').style.display = 'none';
+            if (result.recoveryCodes && result.recoveryCodes.length) {
+                document.getElementById('edit-totp-recovery-codes').textContent = result.recoveryCodes.join('\n');
+                document.getElementById('edit-totp-recovery').style.display = 'block';
+                document.getElementById('btn-edit-totp-recovery-done').onclick = async () => {
+                    document.getElementById('edit-totp-recovery').style.display = 'none';
+                    await this.loadUserTotpStatus(userId);
+                };
+            } else {
+                await this.loadUserTotpStatus(userId);
+            }
+        } catch (err) {
+            errorEl.textContent = err.message;
+            errorEl.style.display = 'block';
+            document.getElementById('edit-totp-code').value = '';
+            document.getElementById('edit-totp-code').focus();
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Enable 2FA';
+        }
+    }
+
+    async disableUserTotp(userId) {
+        if (!confirm('Disable 2FA for this user?')) return;
+
+        try {
+            await API.auth.totp.adminDisable(userId);
+            await this.loadUserTotpStatus(userId);
+        } catch (err) {
+            alert('Error disabling 2FA: ' + err.message);
         }
     }
 

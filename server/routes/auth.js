@@ -1,7 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
+const QRCode = require('qrcode');
 const db = require('../db');
 const auth = require('../auth');
+
+const totpVerifyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5,
+    skipSuccessfulRequests: true,
+    message: { error: 'Too many failed attempts, please try again later' }
+});
 
 // Configure Passport strategies
 auth.configureLocalStrategy(
@@ -38,11 +47,9 @@ router.get('/oidc/login', auth.passport.authenticate('openidconnect'));
 router.get('/oidc/callback',
     auth.passport.authenticate('openidconnect', { session: false, failureRedirect: '/login.html?error=SSO+Failed' }),
     (req, res) => {
-        // Successful authentication
         const token = auth.generateToken(req.user);
-
-        // Redirect to hompage with token
-        res.redirect(`/?token=${token}`);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+        res.redirect('/');
     }
 );
 
@@ -91,8 +98,8 @@ router.post('/setup', async (req, res) => {
             role: 'admin'
         });
 
-        // Generate token for immediate login
         const token = auth.generateToken(adminUser);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
 
         res.status(201).json({
             message: 'Admin user created successfully',
@@ -110,7 +117,7 @@ router.post('/setup', async (req, res) => {
  * POST /api/auth/login
  */
 router.post('/login', (req, res, next) => {
-    auth.passport.authenticate('local', { session: false }, (err, user, info) => {
+    auth.passport.authenticate('local', { session: false }, async (err, user, info) => {
         if (err) {
             console.error('Login error:', err);
             return res.status(500).json({ error: 'Server error' });
@@ -120,18 +127,329 @@ router.post('/login', (req, res, next) => {
             return res.status(401).json({ error: info?.message || 'Invalid credentials' });
         }
 
-        // Generate JWT token
-        const token = auth.generateToken(user);
+        // If 2FA is enabled, issue a short-lived temp token instead of the full JWT
+        const fullUser = await db.users.getById(user.id);
+        if (fullUser && fullUser.totpEnabled) {
+            const tempToken = auth.generateTempToken(user.id);
+            return res.json({ requires2fa: true, tempToken });
+        }
 
+        const token = auth.generateToken(user);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
         res.json({
             token,
-            user: {
-                id: user.id,
-                username: user.username,
-                role: user.role
-            }
+            user: { id: user.id, username: user.username, role: user.role }
         });
     })(req, res, next);
+});
+
+/**
+ * Verify TOTP code after login
+ * POST /api/auth/2fa/verify
+ */
+router.post('/2fa/verify', totpVerifyLimiter, async (req, res) => {
+    try {
+        const { tempToken, code } = req.body;
+
+        if (!tempToken || !code) {
+            return res.status(400).json({ error: 'tempToken and code are required' });
+        }
+
+        const payload = auth.verifyTempToken(tempToken);
+        if (!payload) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+
+        const user = await db.users.getById(payload.id);
+        if (!user || !user.totpEnabled || !user.totpSecret) {
+            return res.status(401).json({ error: 'Invalid request' });
+        }
+
+        const plainSecret = auth.decryptSecret(user.totpSecret);
+        const totpValid = auth.verifyTotpToken(String(code), plainSecret);
+
+        if (!totpValid) {
+            // Try recovery code fallback
+            const recoveryIndex = user.recoveryCodes
+                ? await auth.matchRecoveryCode(String(code), user.recoveryCodes)
+                : -1;
+
+            if (recoveryIndex === -1) {
+                return res.status(401).json({ error: 'Invalid authenticator code' });
+            }
+
+            // Consume the used recovery code
+            const updatedCodes = [...user.recoveryCodes];
+            updatedCodes[recoveryIndex] = null;
+            await db.users.update(user.id, { recoveryCodes: updatedCodes });
+        }
+
+        const token = auth.generateToken(user);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+        res.json({
+            token,
+            user: { id: user.id, username: user.username, role: user.role }
+        });
+    } catch (err) {
+        console.error('2FA verify error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Start 2FA setup — generate secret and return QR code
+ * GET /api/auth/2fa/setup
+ */
+router.get('/2fa/setup', auth.requireAuth, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled' });
+        }
+
+        const secret = auth.generateTotpSecret();
+        const uri = auth.generateTotpUri(user.username, secret);
+        const qrDataUrl = await QRCode.toDataURL(uri);
+
+        await db.users.update(user.id, { totpPendingSecret: auth.encryptSecret(secret) });
+
+        res.json({ qrDataUrl, secret });
+    } catch (err) {
+        console.error('2FA setup error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Confirm 2FA setup — verify code and activate
+ * POST /api/auth/2fa/enable
+ */
+router.post('/2fa/enable', auth.requireAuth, async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) return res.status(400).json({ error: 'code is required' });
+
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled' });
+        }
+
+        if (!user.totpPendingSecret) {
+            return res.status(400).json({ error: 'No pending 2FA setup. Call GET /2fa/setup first.' });
+        }
+
+        const plainPending = auth.decryptSecret(user.totpPendingSecret);
+        if (!auth.verifyTotpToken(String(code), plainPending)) {
+            return res.status(401).json({ error: 'Invalid authenticator code' });
+        }
+
+        const { plaintext: recoveryCodes, hashed: hashedCodes } = await auth.generateRecoveryCodes();
+
+        await db.users.update(user.id, {
+            totpSecret: auth.encryptSecret(plainPending),
+            totpEnabled: true,
+            totpPendingSecret: null,
+            recoveryCodes: hashedCodes
+        });
+
+        res.json({ success: true, message: '2FA enabled successfully', recoveryCodes });
+    } catch (err) {
+        console.error('2FA enable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Disable 2FA — requires password confirmation
+ * POST /api/auth/2fa/disable
+ */
+router.post('/2fa/disable', auth.requireAuth, async (req, res) => {
+    try {
+        const { password } = req.body;
+        if (!password) return res.status(400).json({ error: 'password is required' });
+
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is not enabled' });
+        }
+
+        if (!user.passwordHash || !(await auth.verifyPassword(password, user.passwordHash))) {
+            return res.status(401).json({ error: 'Invalid password' });
+        }
+
+        await db.users.update(user.id, {
+            totpSecret: null,
+            totpEnabled: false,
+            totpPendingSecret: null,
+            recoveryCodes: null
+        });
+
+        res.json({ success: true, message: '2FA disabled successfully' });
+    } catch (err) {
+        console.error('2FA disable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Get 2FA status for the current user
+ * GET /api/auth/2fa/status
+ */
+router.get('/2fa/status', auth.requireAuth, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.user.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ totpEnabled: !!user.totpEnabled });
+    } catch (err) {
+        console.error('2FA status error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: get 2FA status for any user
+ * GET /api/auth/users/:id/2fa/status
+ */
+router.get('/users/:id/2fa/status', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ totpEnabled: !!user.totpEnabled });
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: reset 2FA for a user — disables current secret and generates a new pending one
+ * POST /api/auth/users/:id/2fa/reset
+ * The active secret is never returned; the user must re-enroll via the new QR.
+ */
+router.post('/users/:id/2fa/reset', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is not enabled for this user' });
+        }
+
+        const newSecret = auth.generateTotpSecret();
+        const uri = auth.generateTotpUri(user.username, newSecret);
+        const qrDataUrl = await QRCode.toDataURL(uri);
+
+        await db.users.update(user.id, {
+            totpSecret: null,
+            totpEnabled: false,
+            totpPendingSecret: auth.encryptSecret(newSecret),
+            recoveryCodes: null
+        });
+
+        res.json({ qrDataUrl, message: '2FA has been reset. User must re-enroll with the new QR code.' });
+    } catch (err) {
+        console.error('Admin 2FA reset error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: start 2FA setup for any user — generate secret + QR code
+ * GET /api/auth/users/:id/2fa/setup
+ */
+router.get('/users/:id/2fa/setup', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled for this user' });
+        }
+
+        const secret = auth.generateTotpSecret();
+        const uri = auth.generateTotpUri(user.username, secret);
+        const qrDataUrl = await QRCode.toDataURL(uri);
+
+        await db.users.update(user.id, { totpPendingSecret: auth.encryptSecret(secret) });
+
+        res.json({ qrDataUrl, secret });
+    } catch (err) {
+        console.error('Admin 2FA setup error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: confirm 2FA setup for any user
+ * POST /api/auth/users/:id/2fa/enable
+ */
+router.post('/users/:id/2fa/enable', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) return res.status(400).json({ error: 'code is required' });
+
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is already enabled for this user' });
+        }
+
+        if (!user.totpPendingSecret) {
+            return res.status(400).json({ error: 'No pending 2FA setup. Call GET /users/:id/2fa/setup first.' });
+        }
+
+        const plainPending = auth.decryptSecret(user.totpPendingSecret);
+        if (!auth.verifyTotpToken(String(code), plainPending)) {
+            return res.status(401).json({ error: 'Invalid authenticator code' });
+        }
+
+        const { plaintext: recoveryCodes, hashed: hashedCodes } = await auth.generateRecoveryCodes();
+
+        await db.users.update(user.id, {
+            totpSecret: auth.encryptSecret(plainPending),
+            totpEnabled: true,
+            totpPendingSecret: null,
+            recoveryCodes: hashedCodes
+        });
+
+        res.json({ success: true, message: '2FA enabled successfully', recoveryCodes });
+    } catch (err) {
+        console.error('Admin 2FA enable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+/**
+ * Admin: force-disable 2FA for any user
+ * DELETE /api/auth/users/:id/2fa
+ */
+router.delete('/users/:id/2fa', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const user = await db.users.getById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        if (!user.totpEnabled) {
+            return res.status(400).json({ error: '2FA is not enabled for this user' });
+        }
+
+        await db.users.update(user.id, {
+            totpSecret: null,
+            totpEnabled: false,
+            totpPendingSecret: null,
+            recoveryCodes: null
+        });
+
+        res.json({ success: true, message: '2FA disabled successfully' });
+    } catch (err) {
+        console.error('Admin 2FA disable error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 /**
@@ -139,8 +457,7 @@ router.post('/login', (req, res, next) => {
  * POST /api/auth/logout
  */
 router.post('/logout', (req, res) => {
-    // With JWT, logout is handled client-side by removing the token
-    // This endpoint exists for consistency and future server-side token blacklisting
+    res.clearCookie('token', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
     res.json({ success: true, message: 'Logged out successfully' });
 });
 
@@ -175,10 +492,9 @@ router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const allUsers = await db.users.getAll();
 
-        // Remove password hashes
         const users = allUsers.map(u => {
-            const { passwordHash, ...userWithoutPassword } = u;
-            return userWithoutPassword;
+            const { passwordHash, totpSecret, totpPendingSecret, recoveryCodes, ...safe } = u;
+            return safe;
         });
 
         res.json(users);

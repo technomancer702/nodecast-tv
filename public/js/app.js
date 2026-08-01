@@ -165,29 +165,16 @@ class App {
     }
 
     async checkAuth() {
-        const token = localStorage.getItem('authToken');
-
-        if (!token) {
-            // No token, redirect to login (replace to avoid back button issues)
-            window.location.replace('/login.html');
-            return;
-        }
-
         try {
-            // Verify token with server
-            const response = await fetch('/api/auth/me', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
+            const response = await fetch('/api/auth/me', { credentials: 'same-origin' });
 
             if (!response.ok) {
-                throw new Error('Invalid token');
+                window.location.replace('/login.html');
+                return;
             }
 
             this.currentUser = await response.json();
 
-            // Hide settings for viewers
             if (this.currentUser.role === 'viewer') {
                 const settingsLink = document.querySelector('.nav-link[data-page="settings"]');
                 if (settingsLink) {
@@ -195,12 +182,10 @@ class App {
                 }
             }
 
-            // Add logout button to navbar
             this.addLogoutButton();
 
         } catch (err) {
             console.error('Authentication error:', err);
-            localStorage.removeItem('authToken');
             window.location.replace('/login.html');
         }
     }
@@ -222,18 +207,7 @@ class App {
 
         logoutLink.addEventListener('click', async (e) => {
             e.preventDefault();
-
-            const token = localStorage.getItem('authToken');
-            if (token) {
-                await fetch('/api/auth/logout', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-            }
-
-            localStorage.removeItem('authToken');
+            await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
             window.location.replace('/login.html');
         });
 

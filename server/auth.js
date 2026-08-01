@@ -1,8 +1,10 @@
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const passport = require('passport');
 const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const { Strategy: LocalStrategy } = require('passport-local');
+const speakeasy = require('speakeasy');
 
 /**
  * Authentication and Authorization Module
@@ -10,9 +12,27 @@ const { Strategy: LocalStrategy } = require('passport-local');
  * Using Passport.js with JWT tokens
  */
 
-// JWT Secret - In production, use environment variable
-const JWT_SECRET = process.env.JWT_SECRET || 'nodecast-tv-secret-key-change-in-production';
+// JWT Secret — required in production, random fallback in development only
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET environment variable is required in production');
+}
+if (!process.env.JWT_SECRET) {
+    console.warn('⚠️  JWT_SECRET not set. Using a random secret (dev only — tokens reset on restart).');
+}
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 const JWT_EXPIRY = '24h';
+const TEMP_TOKEN_EXPIRY = '5m';
+
+// TOTP encryption key — 32-byte hex (64 chars). Required in production.
+if (!process.env.TOTP_ENCRYPTION_KEY && process.env.NODE_ENV === 'production') {
+    throw new Error('TOTP_ENCRYPTION_KEY environment variable is required in production');
+}
+if (!process.env.TOTP_ENCRYPTION_KEY) {
+    console.warn('⚠️  TOTP_ENCRYPTION_KEY not set. TOTP secrets will not be encrypted (dev only).');
+}
+const TOTP_KEY = process.env.TOTP_ENCRYPTION_KEY
+    ? Buffer.from(process.env.TOTP_ENCRYPTION_KEY, 'hex')
+    : null;
 
 /**
  * Hash password using bcrypt
@@ -56,6 +76,108 @@ function verifyToken(token) {
 }
 
 /**
+ * Generate a short-lived temp token used during the 2FA verification step
+ */
+function generateTempToken(userId) {
+    return jwt.sign({ id: userId, purpose: '2fa' }, JWT_SECRET, { expiresIn: TEMP_TOKEN_EXPIRY });
+}
+
+/**
+ * Verify a temp 2FA token and return the payload, or null if invalid
+ */
+function verifyTempToken(token) {
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (payload.purpose !== '2fa') return null;
+        return payload;
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * Generate a new TOTP secret for a user (returns base32 string)
+ */
+function generateTotpSecret() {
+    return speakeasy.generateSecret({ length: 20 }).base32;
+}
+
+/**
+ * Generate the otpauth URI used to build the QR code
+ */
+function generateTotpUri(username, secret) {
+    return speakeasy.otpauthURL({
+        secret,
+        label: username,
+        issuer: 'NodeCast TV',
+        encoding: 'base32'
+    });
+}
+
+/**
+ * Verify a TOTP token against a secret
+ */
+function verifyTotpToken(token, secret) {
+    try {
+        return speakeasy.totp.verify({ secret, encoding: 'base32', token: String(token), window: 1 });
+    } catch (err) {
+        return false;
+    }
+}
+
+/**
+ * Encrypt a TOTP secret using AES-256-GCM.
+ * Returns plaintext unchanged when TOTP_KEY is not set (dev only).
+ * Format: "enc:iv(hex):authTag(hex):ciphertext(hex)"
+ */
+function encryptSecret(plaintext) {
+    if (!TOTP_KEY) return plaintext;
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', TOTP_KEY, iv);
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `enc:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+/**
+ * Decrypt a TOTP secret encrypted by encryptSecret().
+ * Returns the value unchanged if it was stored unencrypted (dev fallback).
+ */
+function decryptSecret(value) {
+    if (!value || !value.startsWith('enc:')) return value;
+    if (!TOTP_KEY) throw new Error('TOTP_ENCRYPTION_KEY required to decrypt secrets');
+    const [, ivHex, tagHex, ctHex] = value.split(':');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', TOTP_KEY, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return decipher.update(Buffer.from(ctHex, 'hex')) + decipher.final('utf8');
+}
+
+/**
+ * Generate N single-use recovery codes (format: XXXXX-XXXXX).
+ * Returns { plaintext: string[], hashed: string[] } — store hashed, show plaintext once.
+ */
+async function generateRecoveryCodes(count = 8) {
+    const plaintext = Array.from({ length: count }, () => {
+        const hex = crypto.randomBytes(5).toString('hex').toUpperCase();
+        return `${hex.slice(0, 5)}-${hex.slice(5)}`;
+    });
+    const hashed = await Promise.all(plaintext.map(c => bcrypt.hash(c, 10)));
+    return { plaintext, hashed };
+}
+
+/**
+ * Find and consume a recovery code. Returns the index of the matched code, or -1.
+ */
+async function matchRecoveryCode(input, hashedCodes) {
+    const normalized = input.replace(/\s/g, '').toUpperCase();
+    for (let i = 0; i < hashedCodes.length; i++) {
+        if (!hashedCodes[i]) continue; // already consumed
+        if (await bcrypt.compare(normalized, hashedCodes[i])) return i;
+    }
+    return -1;
+}
+
+/**
  * Configure Passport Local Strategy for username/password authentication
  */
 function configureLocalStrategy(getUserByUsername, verifyUserPassword) {
@@ -87,7 +209,10 @@ function configureLocalStrategy(getUserByUsername, verifyUserPassword) {
  */
 function configureJwtStrategy(getUserById) {
     const options = {
-        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+        jwtFromRequest: ExtractJwt.fromExtractors([
+            (req) => req?.cookies?.token || null,
+            ExtractJwt.fromAuthHeaderAsBearerToken()
+        ]),
         secretOrKey: JWT_SECRET
     };
 
@@ -258,6 +383,15 @@ module.exports = {
     verifyPassword,
     generateToken,
     verifyToken,
+    generateTempToken,
+    verifyTempToken,
+    generateTotpSecret,
+    generateTotpUri,
+    verifyTotpToken,
+    encryptSecret,
+    decryptSecret,
+    generateRecoveryCodes,
+    matchRecoveryCode,
     configureLocalStrategy,
     configureJwtStrategy,
     configureSessionSerialization,
