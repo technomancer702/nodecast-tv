@@ -9,16 +9,9 @@ const API = {
     async request(method, endpoint, data = null) {
         const options = {
             method,
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin'
         };
-
-        // Add authentication token if available
-        const token = localStorage.getItem('authToken');
-        if (token) {
-            options.headers['Authorization'] = `Bearer ${token}`;
-        }
 
         if (data) {
             options.body = JSON.stringify(data);
@@ -36,9 +29,7 @@ const API = {
         }
 
         if (!response.ok) {
-            // If unauthorized, redirect to login
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
                 window.location.href = '/login.html';
                 return;
             }
@@ -186,15 +177,14 @@ const API = {
             adminSetup: (userId) => API.request('GET', `/auth/users/${userId}/2fa/setup`),
             adminEnable: (userId, code) => API.request('POST', `/auth/users/${userId}/2fa/enable`, { code }),
             adminDisable: (userId) => API.request('DELETE', `/auth/users/${userId}/2fa`),
-            adminQr: (userId) => API.request('GET', `/auth/users/${userId}/2fa/qr`)
+            adminReset: (userId) => API.request('POST', `/auth/users/${userId}/2fa/reset`)
         }
     },
 
-    getToken: () => localStorage.getItem('authToken'),
-    setToken: (token) => {
-        if (token) localStorage.setItem('authToken', token);
-        else localStorage.removeItem('authToken');
-    }
+    // Token is now stored in an HttpOnly cookie managed by the server.
+    // These stubs exist for backward compatibility with any code that calls them.
+    getToken: () => null,
+    setToken: () => {}
 };
 
 // Make API available globally

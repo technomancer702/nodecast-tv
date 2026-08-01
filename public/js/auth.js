@@ -17,19 +17,11 @@ const Auth = {
                 return false;
             }
 
-            // Check if user is logged in
-            if (API.getToken()) {
-                try {
-                    this.currentUser = await API.auth.me();
-                    return true;
-                } catch (error) {
-                    // Token invalid, clear it
-                    console.log('Token invalid, showing login');
-                    API.setToken(null);
-                    this.showLogin();
-                    return false;
-                }
-            } else {
+            // Check if user is logged in (cookie is sent automatically)
+            try {
+                this.currentUser = await API.auth.me();
+                return true;
+            } catch (error) {
                 this.showLogin();
                 return false;
             }
@@ -82,7 +74,6 @@ const Auth = {
     async setup(username, password) {
         try {
             const result = await API.auth.setup(username, password);
-            API.setToken(result.token);
             this.currentUser = result.user;
             this.showApp();
             return true;
@@ -97,7 +88,6 @@ const Auth = {
     async login(username, password) {
         try {
             const result = await API.auth.login(username, password);
-            API.setToken(result.token);
             this.currentUser = result.user;
             this.showApp();
             return true;
@@ -115,7 +105,6 @@ const Auth = {
         } catch (error) {
             console.error('Logout error:', error);
         } finally {
-            API.setToken(null);
             this.currentUser = null;
             this.showLogin();
         }

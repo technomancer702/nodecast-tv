@@ -1112,23 +1112,30 @@
               </div>
             </div>
 
-            <!-- View current QR (when 2FA already enabled) -->
-            <div id="edit-totp-view" style="display:none;margin-top:12px;">
-              <p class="hint" style="margin-bottom:10px;">Current QR code and secret key for this user's authenticator app.</p>
+            <!-- Reset 2FA flow (generates a new secret, never shows the current one) -->
+            <div id="edit-totp-reset" style="display:none;margin-top:12px;">
+              <p class="hint" style="margin-bottom:10px;">This will invalidate the current 2FA secret immediately. The user must re-enroll with the new QR code.</p>
               <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
-                <img id="edit-totp-view-qr" src="" alt="QR Code" style="width:140px;height:140px;border-radius:6px;background:#fff;padding:4px;flex-shrink:0;">
+                <img id="edit-totp-reset-qr" src="" alt="QR Code" style="width:140px;height:140px;border-radius:6px;background:#fff;padding:4px;flex-shrink:0;">
                 <div style="flex:1;min-width:180px;">
-                  <p class="hint" style="margin-bottom:4px;font-size:12px;">Secret key:</p>
-                  <code id="edit-totp-view-secret" style="font-size:12px;word-break:break-all;color:var(--color-accent);display:block;margin-bottom:10px;"></code>
-                  <button type="button" id="btn-edit-totp-view-close" class="btn btn-secondary btn-sm">Close</button>
+                  <p class="hint" style="margin-bottom:8px;font-size:12px;">Share this QR with the user to re-configure their authenticator app. The secret is not shown.</p>
+                  <button type="button" id="btn-edit-totp-reset-close" class="btn btn-secondary btn-sm">Close</button>
                 </div>
               </div>
+            </div>
+
+            <!-- Recovery codes (shown once after 2FA is enabled) -->
+            <div id="edit-totp-recovery" style="display:none;margin-top:12px;">
+              <p class="hint" style="margin-bottom:8px;font-weight:600;color:var(--color-warning);">Save these recovery codes now — they will not be shown again.</p>
+              <p class="hint" style="margin-bottom:8px;font-size:12px;">Each code can only be used once. Use them if you lose access to your authenticator app.</p>
+              <pre id="edit-totp-recovery-codes" style="font-size:13px;background:var(--color-bg-tertiary);border:1px solid var(--color-border);border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-all;margin-bottom:8px;"></pre>
+              <button type="button" id="btn-edit-totp-recovery-done" class="btn btn-primary btn-sm">I have saved my codes</button>
             </div>
 
             <!-- Action buttons (when setup not open) -->
             <div id="edit-totp-actions" style="margin-top:10px;display:flex;gap:8px;">
               <button type="button" id="btn-edit-totp-setup" class="btn btn-secondary btn-sm" style="display:none;">Setup 2FA</button>
-              <button type="button" id="btn-edit-totp-view" class="btn btn-secondary btn-sm" style="display:none;">View QR Code</button>
+              <button type="button" id="btn-edit-totp-reset" class="btn btn-secondary btn-sm" style="display:none;">Reset 2FA</button>
               <button type="button" id="btn-edit-totp-disable" class="btn btn-error btn-sm" style="display:none;">Disable 2FA</button>
             </div>
           </div>
@@ -1156,20 +1163,6 @@
   <script src="/js/pages/Settings.js?v=2"></script>
   <script src="/js/pages/WatchPage.js?v=1"></script>
   <script src="/js/app.js?v=4"></script>
-  <script>
-    // Check for SSO token in URL
-    (function () {
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token');
-      if (token) {
-        console.log('SSO Login successful, saving token...');
-        localStorage.setItem('authToken', token);
-        // Clean URL without reloading
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, newUrl);
-      }
-    })();
-  </script>
 </body>
 
 </html>

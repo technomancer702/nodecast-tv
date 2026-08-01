@@ -1,8 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
 const db = require('../db');
 const auth = require('../auth');
+
+const totpVerifyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5,
+    skipSuccessfulRequests: true,
+    message: { error: 'Too many failed attempts, please try again later' }
+});
 
 // Configure Passport strategies
 auth.configureLocalStrategy(
@@ -39,11 +47,9 @@ router.get('/oidc/login', auth.passport.authenticate('openidconnect'));
 router.get('/oidc/callback',
     auth.passport.authenticate('openidconnect', { session: false, failureRedirect: '/login.html?error=SSO+Failed' }),
     (req, res) => {
-        // Successful authentication
         const token = auth.generateToken(req.user);
-
-        // Redirect to hompage with token
-        res.redirect(`/?token=${token}`);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+        res.redirect('/');
     }
 );
 
@@ -92,8 +98,8 @@ router.post('/setup', async (req, res) => {
             role: 'admin'
         });
 
-        // Generate token for immediate login
         const token = auth.generateToken(adminUser);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
 
         res.status(201).json({
             message: 'Admin user created successfully',
@@ -129,6 +135,7 @@ router.post('/login', (req, res, next) => {
         }
 
         const token = auth.generateToken(user);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
         res.json({
             token,
             user: { id: user.id, username: user.username, role: user.role }
@@ -140,7 +147,7 @@ router.post('/login', (req, res, next) => {
  * Verify TOTP code after login
  * POST /api/auth/2fa/verify
  */
-router.post('/2fa/verify', async (req, res) => {
+router.post('/2fa/verify', totpVerifyLimiter, async (req, res) => {
     try {
         const { tempToken, code } = req.body;
 
@@ -158,11 +165,27 @@ router.post('/2fa/verify', async (req, res) => {
             return res.status(401).json({ error: 'Invalid request' });
         }
 
-        if (!auth.verifyTotpToken(String(code), user.totpSecret)) {
-            return res.status(401).json({ error: 'Invalid authenticator code' });
+        const plainSecret = auth.decryptSecret(user.totpSecret);
+        const totpValid = auth.verifyTotpToken(String(code), plainSecret);
+
+        if (!totpValid) {
+            // Try recovery code fallback
+            const recoveryIndex = user.recoveryCodes
+                ? await auth.matchRecoveryCode(String(code), user.recoveryCodes)
+                : -1;
+
+            if (recoveryIndex === -1) {
+                return res.status(401).json({ error: 'Invalid authenticator code' });
+            }
+
+            // Consume the used recovery code
+            const updatedCodes = [...user.recoveryCodes];
+            updatedCodes[recoveryIndex] = null;
+            await db.users.update(user.id, { recoveryCodes: updatedCodes });
         }
 
         const token = auth.generateToken(user);
+        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
         res.json({
             token,
             user: { id: user.id, username: user.username, role: user.role }
@@ -190,8 +213,7 @@ router.get('/2fa/setup', auth.requireAuth, async (req, res) => {
         const uri = auth.generateTotpUri(user.username, secret);
         const qrDataUrl = await QRCode.toDataURL(uri);
 
-        // Store the pending secret (not yet enabled until verified)
-        await db.users.update(user.id, { totpPendingSecret: secret });
+        await db.users.update(user.id, { totpPendingSecret: auth.encryptSecret(secret) });
 
         res.json({ qrDataUrl, secret });
     } catch (err) {
@@ -220,17 +242,21 @@ router.post('/2fa/enable', auth.requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'No pending 2FA setup. Call GET /2fa/setup first.' });
         }
 
-        if (!auth.verifyTotpToken(String(code), user.totpPendingSecret)) {
+        const plainPending = auth.decryptSecret(user.totpPendingSecret);
+        if (!auth.verifyTotpToken(String(code), plainPending)) {
             return res.status(401).json({ error: 'Invalid authenticator code' });
         }
 
+        const { plaintext: recoveryCodes, hashed: hashedCodes } = await auth.generateRecoveryCodes();
+
         await db.users.update(user.id, {
-            totpSecret: user.totpPendingSecret,
+            totpSecret: auth.encryptSecret(plainPending),
             totpEnabled: true,
-            totpPendingSecret: null
+            totpPendingSecret: null,
+            recoveryCodes: hashedCodes
         });
 
-        res.json({ success: true, message: '2FA enabled successfully' });
+        res.json({ success: true, message: '2FA enabled successfully', recoveryCodes });
     } catch (err) {
         console.error('2FA enable error:', err);
         res.status(500).json({ error: 'Server error' });
@@ -260,7 +286,8 @@ router.post('/2fa/disable', auth.requireAuth, async (req, res) => {
         await db.users.update(user.id, {
             totpSecret: null,
             totpEnabled: false,
-            totpPendingSecret: null
+            totpPendingSecret: null,
+            recoveryCodes: null
         });
 
         res.json({ success: true, message: '2FA disabled successfully' });
@@ -300,24 +327,33 @@ router.get('/users/:id/2fa/status', auth.requireAuth, auth.requireAdmin, async (
 });
 
 /**
- * Admin: view QR code for a user with 2FA already enabled
- * GET /api/auth/users/:id/2fa/qr
+ * Admin: reset 2FA for a user — disables current secret and generates a new pending one
+ * POST /api/auth/users/:id/2fa/reset
+ * The active secret is never returned; the user must re-enroll via the new QR.
  */
-router.get('/users/:id/2fa/qr', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+router.post('/users/:id/2fa/reset', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const user = await db.users.getById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
 
-        if (!user.totpEnabled || !user.totpSecret) {
+        if (!user.totpEnabled) {
             return res.status(400).json({ error: '2FA is not enabled for this user' });
         }
 
-        const uri = auth.generateTotpUri(user.username, user.totpSecret);
+        const newSecret = auth.generateTotpSecret();
+        const uri = auth.generateTotpUri(user.username, newSecret);
         const qrDataUrl = await QRCode.toDataURL(uri);
 
-        res.json({ qrDataUrl, secret: user.totpSecret });
+        await db.users.update(user.id, {
+            totpSecret: null,
+            totpEnabled: false,
+            totpPendingSecret: auth.encryptSecret(newSecret),
+            recoveryCodes: null
+        });
+
+        res.json({ qrDataUrl, message: '2FA has been reset. User must re-enroll with the new QR code.' });
     } catch (err) {
-        console.error('Admin 2FA QR error:', err);
+        console.error('Admin 2FA reset error:', err);
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -339,7 +375,7 @@ router.get('/users/:id/2fa/setup', auth.requireAuth, auth.requireAdmin, async (r
         const uri = auth.generateTotpUri(user.username, secret);
         const qrDataUrl = await QRCode.toDataURL(uri);
 
-        await db.users.update(user.id, { totpPendingSecret: secret });
+        await db.users.update(user.id, { totpPendingSecret: auth.encryptSecret(secret) });
 
         res.json({ qrDataUrl, secret });
     } catch (err) {
@@ -368,17 +404,21 @@ router.post('/users/:id/2fa/enable', auth.requireAuth, auth.requireAdmin, async 
             return res.status(400).json({ error: 'No pending 2FA setup. Call GET /users/:id/2fa/setup first.' });
         }
 
-        if (!auth.verifyTotpToken(String(code), user.totpPendingSecret)) {
+        const plainPending = auth.decryptSecret(user.totpPendingSecret);
+        if (!auth.verifyTotpToken(String(code), plainPending)) {
             return res.status(401).json({ error: 'Invalid authenticator code' });
         }
 
+        const { plaintext: recoveryCodes, hashed: hashedCodes } = await auth.generateRecoveryCodes();
+
         await db.users.update(user.id, {
-            totpSecret: user.totpPendingSecret,
+            totpSecret: auth.encryptSecret(plainPending),
             totpEnabled: true,
-            totpPendingSecret: null
+            totpPendingSecret: null,
+            recoveryCodes: hashedCodes
         });
 
-        res.json({ success: true, message: '2FA enabled successfully' });
+        res.json({ success: true, message: '2FA enabled successfully', recoveryCodes });
     } catch (err) {
         console.error('Admin 2FA enable error:', err);
         res.status(500).json({ error: 'Server error' });
@@ -401,7 +441,8 @@ router.delete('/users/:id/2fa', auth.requireAuth, auth.requireAdmin, async (req,
         await db.users.update(user.id, {
             totpSecret: null,
             totpEnabled: false,
-            totpPendingSecret: null
+            totpPendingSecret: null,
+            recoveryCodes: null
         });
 
         res.json({ success: true, message: '2FA disabled successfully' });
@@ -416,8 +457,7 @@ router.delete('/users/:id/2fa', auth.requireAuth, auth.requireAdmin, async (req,
  * POST /api/auth/logout
  */
 router.post('/logout', (req, res) => {
-    // With JWT, logout is handled client-side by removing the token
-    // This endpoint exists for consistency and future server-side token blacklisting
+    res.clearCookie('token', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
     res.json({ success: true, message: 'Logged out successfully' });
 });
 
@@ -453,7 +493,7 @@ router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
         const allUsers = await db.users.getAll();
 
         const users = allUsers.map(u => {
-            const { passwordHash, totpSecret, totpPendingSecret, ...safe } = u;
+            const { passwordHash, totpSecret, totpPendingSecret, recoveryCodes, ...safe } = u;
             return safe;
         });
 

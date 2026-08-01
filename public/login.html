@@ -207,16 +207,20 @@
             <!-- Step 2: 2FA code (hidden until needed) -->
             <form id="totp-form" style="display:none;">
                 <div class="form-group">
-                    <label for="totp-code">Authenticator Code</label>
+                    <label for="totp-code" id="totp-code-label">Authenticator Code</label>
                     <input type="text" id="totp-code" name="totp-code" inputmode="numeric" pattern="[0-9]{6}"
                         maxlength="6" autocomplete="one-time-code" placeholder="6-digit code" autofocus>
                 </div>
-                <p class="totp-hint">Enter the code from your authenticator app.</p>
+                <p class="totp-hint" id="totp-hint-text">Enter the code from your authenticator app.</p>
                 <button type="submit" class="btn-login" id="totp-submit-btn">Verify</button>
                 <button type="button" class="btn-login" id="totp-back-btn"
                     style="margin-top:10px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);">
                     Back
                 </button>
+                <p style="text-align:center;margin-top:14px;font-size:13px;color:var(--color-text-secondary);">
+                    Lost access to your app?
+                    <a href="#" id="totp-use-recovery" style="color:var(--color-accent);text-decoration:none;">Use a recovery code</a>
+                </p>
             </form>
 
             <div class="sso-divider" style="text-align: center; margin: 20px 0; position: relative;">
@@ -302,13 +306,49 @@
             el.classList.remove('show');
         }
 
+        let usingRecoveryCode = false;
+
+        function setTotpInputMode(recovery) {
+            usingRecoveryCode = recovery;
+            const input = document.getElementById('totp-code');
+            const label = document.getElementById('totp-code-label');
+            const hint = document.getElementById('totp-hint-text');
+            const link = document.getElementById('totp-use-recovery');
+            if (recovery) {
+                input.inputMode = 'text';
+                input.removeAttribute('pattern');
+                input.maxLength = 11;
+                input.placeholder = 'XXXXX-XXXXX';
+                input.autocomplete = 'off';
+                label.textContent = 'Recovery Code';
+                hint.textContent = 'Enter one of your single-use recovery codes.';
+                link.textContent = 'Use authenticator app instead';
+            } else {
+                input.inputMode = 'numeric';
+                input.pattern = '[0-9]{6}';
+                input.maxLength = 6;
+                input.placeholder = '6-digit code';
+                input.autocomplete = 'one-time-code';
+                label.textContent = 'Authenticator Code';
+                hint.textContent = 'Enter the code from your authenticator app.';
+                link.textContent = 'Use a recovery code';
+            }
+            input.value = '';
+            input.focus();
+        }
+
+        document.getElementById('totp-use-recovery').addEventListener('click', (e) => {
+            e.preventDefault();
+            setTotpInputMode(!usingRecoveryCode);
+        });
+
         function showTotpStep() {
             document.getElementById('login-form').style.display = 'none';
             document.querySelector('.sso-divider').style.display = 'none';
             document.getElementById('btn-sso-login').style.display = 'none';
             document.getElementById('totp-form').style.display = 'block';
             document.getElementById('login-subtitle').textContent = 'Two-Factor Authentication';
-            document.getElementById('totp-code').focus();
+            setTotpInputMode(false);
         }
 
         function showLoginStep() {
@@ -320,6 +360,7 @@
             document.getElementById('totp-form').style.display = 'none';
             document.getElementById('login-subtitle').textContent = isSetupMode ? 'Create Admin Account' : 'Sign in to continue';
             pendingTempToken = null;
+            usingRecoveryCode = false;
         }
 
         // Handle login form submission
@@ -352,7 +393,6 @@
                     pendingTempToken = data.tempToken;
                     showTotpStep();
                 } else {
-                    localStorage.setItem('authToken', data.token);
                     window.location.replace('/');
                 }
             } catch (err) {
@@ -387,7 +427,6 @@
                     throw new Error(data.error || 'Verification failed');
                 }
 
-                localStorage.setItem('authToken', data.token);
                 window.location.replace('/');
             } catch (err) {
                 showError(err.message);

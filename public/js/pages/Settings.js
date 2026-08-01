@@ -463,12 +463,12 @@ class SettingsPage {
             const btnConfirm = document.getElementById('btn-edit-totp-confirm');
             const btnCancel = document.getElementById('btn-edit-totp-cancel');
 
-            const btnView = document.getElementById('btn-edit-totp-view');
-            const btnViewClose = document.getElementById('btn-edit-totp-view-close');
+            const btnReset = document.getElementById('btn-edit-totp-reset');
+            const btnResetClose = document.getElementById('btn-edit-totp-reset-close');
 
             btnSetup.onclick = () => this.startUserTotpSetup(user.id);
-            btnView.onclick = () => this.viewUserTotpQr(user.id);
-            btnViewClose.onclick = () => this.closeTotpViewUI();
+            btnReset.onclick = () => this.resetUserTotp(user.id);
+            btnResetClose.onclick = () => this.closeResetTotpUI();
             btnDisable.onclick = () => this.disableUserTotp(user.id);
             btnConfirm.onclick = () => this.confirmUserTotpEnable(user.id);
             btnCancel.onclick = () => this.resetTotpSetupUI();
@@ -667,11 +667,11 @@ class SettingsPage {
     async loadUserTotpStatus(userId) {
         const badge = document.getElementById('edit-totp-badge');
         const btnSetup = document.getElementById('btn-edit-totp-setup');
-        const btnView = document.getElementById('btn-edit-totp-view');
+        const btnReset = document.getElementById('btn-edit-totp-reset');
         const btnDisable = document.getElementById('btn-edit-totp-disable');
 
         this.resetTotpSetupUI();
-        this.closeTotpViewUI();
+        this.closeResetTotpUI();
 
         try {
             const { totpEnabled } = await API.auth.totp.adminStatus(userId);
@@ -680,46 +680,49 @@ class SettingsPage {
                 badge.textContent = 'Enabled';
                 badge.className = 'user-badge user-badge-admin';
                 btnSetup.style.display = 'none';
-                btnView.style.display = 'inline-flex';
+                btnReset.style.display = 'inline-flex';
                 btnDisable.style.display = 'inline-flex';
             } else {
                 badge.textContent = 'Disabled';
                 badge.className = 'user-badge user-badge-viewer';
                 btnSetup.style.display = 'inline-flex';
-                btnView.style.display = 'none';
+                btnReset.style.display = 'none';
                 btnDisable.style.display = 'none';
             }
         } catch (err) {
             badge.textContent = '';
             btnSetup.style.display = 'none';
-            btnView.style.display = 'none';
+            btnReset.style.display = 'none';
             btnDisable.style.display = 'none';
         }
     }
 
     resetTotpSetupUI() {
         document.getElementById('edit-totp-setup').style.display = 'none';
+        document.getElementById('edit-totp-recovery').style.display = 'none';
         document.getElementById('edit-totp-code').value = '';
         document.getElementById('edit-totp-error').style.display = 'none';
         document.getElementById('edit-totp-actions').style.display = 'flex';
     }
 
-    closeTotpViewUI() {
-        document.getElementById('edit-totp-view').style.display = 'none';
+    closeResetTotpUI() {
+        document.getElementById('edit-totp-reset').style.display = 'none';
         document.getElementById('edit-totp-actions').style.display = 'flex';
     }
 
-    async viewUserTotpQr(userId) {
+    async resetUserTotp(userId) {
+        if (!confirm('This will immediately invalidate the current 2FA secret. The user will need to re-enroll. Continue?')) return;
+
         document.getElementById('edit-totp-actions').style.display = 'none';
 
         try {
-            const { qrDataUrl, secret } = await API.auth.totp.adminQr(userId);
-            document.getElementById('edit-totp-view-qr').src = qrDataUrl;
-            document.getElementById('edit-totp-view-secret').textContent = secret;
-            document.getElementById('edit-totp-view').style.display = 'block';
+            const { qrDataUrl } = await API.auth.totp.adminReset(userId);
+            document.getElementById('edit-totp-reset-qr').src = qrDataUrl;
+            document.getElementById('edit-totp-reset').style.display = 'block';
+            await this.loadUserTotpStatus(userId);
         } catch (err) {
             document.getElementById('edit-totp-actions').style.display = 'flex';
-            alert('Error loading QR code: ' + err.message);
+            alert('Error resetting 2FA: ' + err.message);
         }
     }
 
@@ -750,8 +753,20 @@ class SettingsPage {
         btn.textContent = 'Enabling...';
 
         try {
-            await API.auth.totp.adminEnable(userId, code);
-            await this.loadUserTotpStatus(userId);
+            const result = await API.auth.totp.adminEnable(userId, code);
+
+            // Hide setup panel, show recovery codes
+            document.getElementById('edit-totp-setup').style.display = 'none';
+            if (result.recoveryCodes && result.recoveryCodes.length) {
+                document.getElementById('edit-totp-recovery-codes').textContent = result.recoveryCodes.join('\n');
+                document.getElementById('edit-totp-recovery').style.display = 'block';
+                document.getElementById('btn-edit-totp-recovery-done').onclick = async () => {
+                    document.getElementById('edit-totp-recovery').style.display = 'none';
+                    await this.loadUserTotpStatus(userId);
+                };
+            } else {
+                await this.loadUserTotpStatus(userId);
+            }
         } catch (err) {
             errorEl.textContent = err.message;
             errorEl.style.display = 'block';
