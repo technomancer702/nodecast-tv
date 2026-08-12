@@ -14,16 +14,12 @@ const API = {
             }
         };
 
-        // Add authentication token if available
-        const token = localStorage.getItem('authToken');
-        if (token) {
-            options.headers['Authorization'] = `Bearer ${token}`;
-        }
-
         if (data) {
             options.body = JSON.stringify(data);
         }
 
+        // Session is carried via the httpOnly cookie set on login, sent
+        // automatically with this same-origin request.
         const response = await fetch(`/api${endpoint}`, options);
 
         let result;
@@ -38,7 +34,6 @@ const API = {
         if (!response.ok) {
             // If unauthorized, redirect to login
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
                 window.location.href = '/login.html';
                 return;
             }

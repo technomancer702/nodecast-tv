@@ -298,9 +298,8 @@
                     throw new Error(data.error || 'Authentication failed');
                 }
 
-                // Store token
-                localStorage.setItem('authToken', data.token);
-
+                // Server has set an httpOnly session cookie - the browser will
+                // stay logged in on subsequent visits without re-entering credentials.
                 // Redirect to main app (replace history to prevent back button issues)
                 window.location.replace('/');
 
