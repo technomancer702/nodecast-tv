@@ -4,6 +4,7 @@
  */
 
 const sax = require('sax');
+const { fetchValidated } = require('./safeFetch');
 const zlib = require('zlib');
 const { Readable } = require('stream');
 
@@ -183,7 +184,7 @@ function getCurrentAndUpcoming(programmes, channelId, count = 5) {
  * Fetch and parse XMLTV from URL
  */
 async function fetchAndParse(url) {
-    const response = await fetch(url);
+    const response = await fetchValidated(url, { preferHttps: true });
     if (!response.ok) {
         throw new Error(`Failed to fetch EPG: ${response.status} ${response.statusText}`);
     }
@@ -233,7 +234,7 @@ async function fetchAndParse(url) {
  * @yields {{ channels: Array|null, programmes: Array, isLast: boolean }}
  */
 async function* fetchAndParseStreaming(url, batchSize = 1000) {
-    const response = await fetch(url);
+    const response = await fetchValidated(url, { preferHttps: true });
     if (!response.ok) {
         throw new Error(`Failed to fetch EPG: ${response.status} ${response.statusText}`);
     }

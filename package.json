@@ -6,15 +6,17 @@
     "main": "server/index.js",
     "scripts": {
         "start": "node server/index.js",
-        "dev": "node --watch server/index.js"
+        "dev": "node --watch server/index.js",
+        "test": "node --test"
     },
     "dependencies": {
         "@ffprobe-installer/ffprobe": "^2.1.2",
         "bcryptjs": "^3.0.3",
         "better-sqlite3": "^12.5.0",
         "dotenv": "^17.2.3",
-        "express": "^4.18.2",
+        "express": "^4.22.2",
         "express-session": "^1.18.2",
+        "hls.js": "^1.7.0",
         "jsonwebtoken": "^9.0.3",
         "passport": "^0.7.0",
         "passport-jwt": "^4.0.1",
@@ -25,6 +27,9 @@
     },
     "optionalDependencies": {
         "ffmpeg-static": "^5.3.0"
+    },
+    "overrides": {
+        "path-to-regexp": "0.1.13"
     },
     "engines": {
         "node": ">=18.0.0"

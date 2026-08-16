@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../auth');
+
+router.use(requireAuth);
 const { settings, getDefaultSettings } = require('../db');
 const syncService = require('../services/syncService');
 

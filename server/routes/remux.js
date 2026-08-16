@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const db = require('../db');
+const { resolvePlaybackUrl } = require('../services/playbackUrl');
+const { publicUrlLabel } = require('../services/externalUrl');
 
 /**
  * Remux stream (container conversion only)
@@ -14,9 +16,15 @@ const db = require('../db');
  * Note: This does NOT fix Dolby/AC3 audio issues - use /api/transcode for that.
  */
 router.get('/', async (req, res) => {
-    const { url } = req.query;
+    let { url } = req.query;
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
+    }
+
+    try {
+        url = await resolvePlaybackUrl(url);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
@@ -25,7 +33,7 @@ router.get('/', async (req, res) => {
     const settings = await db.settings.get();
     const userAgent = db.getUserAgent(settings);
 
-    console.log(`[Remux] Starting remux for: ${url}`);
+    console.log(`[Remux] Starting remux for: ${publicUrlLabel(url)}`);
     console.log(`[Remux] Using User-Agent: ${settings.userAgentPreset}`);
 
     // FFmpeg arguments for pure remux (no encoding)
@@ -73,7 +81,6 @@ router.get('/', async (req, res) => {
         '-' // Output to stdout
     ];
 
-    console.log(`[Remux] Full command: ${ffmpegPath} ${args.join(' ')}`);
 
     let ffmpeg;
     try {

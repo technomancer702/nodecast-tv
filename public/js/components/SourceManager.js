@@ -132,11 +132,14 @@ class SourceManager {
         const icons = { xtream: Icons.live, m3u: Icons.guide, epg: Icons.series };
 
         container.innerHTML = sources.map(source => `
-      <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
+      <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${this.escapeHtml(String(source.id))}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
-          <div class="source-name">${source.name}</div>
-          <div class="source-url">${source.url}</div>
+          <div class="source-name">${this.escapeHtml(source.name)}</div>
+          <div class="source-url">${this.escapeHtml(source.url)}</div>
+          ${type === 'xtream' && source.fallbackUrls?.length
+                ? `<div class="hint">${source.fallbackUrls.length} alternative DNS configured</div>`
+                : ''}
         </div>
         <div class="source-actions">
           <button class="btn btn-sm btn-secondary" data-action="refresh" title="Refresh Data">${Icons.refresh}</button>
@@ -226,7 +229,7 @@ class SourceManager {
         const nameField = `
       <div class="form-group">
         <label for="source-name">Name</label>
-        <input type="text" id="source-name" class="form-input" placeholder="My Source" value="${source.name || ''}">
+        <input type="text" id="source-name" class="form-input" placeholder="My Source" value="${this.escapeHtml(source.name || '')}">
       </div>
     `;
 
@@ -235,22 +238,29 @@ class SourceManager {
         <label for="source-url">${type === 'xtream' ? 'Server URL' : 'URL'}</label>
         <input type="text" id="source-url" class="form-input" 
                placeholder="${type === 'xtream' ? 'http://server.com:port' : 'https://example.com/playlist.m3u'}" 
-               value="${source.url || ''}">
+               value="${this.escapeHtml(source.url || '')}">
       </div>
     `;
 
         if (type === 'xtream') {
+            const fallbackUrls = Array.isArray(source.fallbackUrls) ? source.fallbackUrls.join('\n') : '';
             return `
         ${nameField}
         ${urlField}
         <div class="form-group">
           <label for="source-username">Username</label>
-          <input type="text" id="source-username" class="form-input" value="${source.username || ''}">
+          <input type="text" id="source-username" class="form-input" value="${this.escapeHtml(source.username || '')}">
         </div>
         <div class="form-group">
           <label for="source-password">Password</label>
           <input type="password" id="source-password" class="form-input" 
-                 value="${source.password && !source.password.includes('•') ? source.password : ''}">
+                 value="">
+        </div>
+        <div class="form-group">
+          <label for="source-fallback-urls">Alternative DNS URLs</label>
+          <textarea id="source-fallback-urls" class="form-input" rows="3"
+                    placeholder="http://alternative-server.com:port">${this.escapeHtml(fallbackUrls)}</textarea>
+          <p class="hint">One URL per line. They are tried automatically if the active DNS fails.</p>
         </div>
       `;
         }
@@ -266,6 +276,8 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim() || null;
         const password = document.getElementById('source-password')?.value.trim() || null;
+        const fallbackUrls = document.getElementById('source-fallback-urls')?.value
+            .split(/\r?\n/).map(value => value.trim()).filter(Boolean) || [];
 
         if (!name || !url) {
             alert('Name and URL are required');
@@ -295,7 +307,7 @@ class SourceManager {
                 }
             }
 
-            await API.sources.create({ type, name, url, username, password });
+            await API.sources.create({ type, name, url, username, password, fallbackUrls });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
 
@@ -317,6 +329,8 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim();
         const password = document.getElementById('source-password')?.value.trim();
+        const fallbackUrls = document.getElementById('source-fallback-urls')?.value
+            .split(/\r?\n/).map(value => value.trim()).filter(Boolean) || [];
 
         if (!name || !url) {
             alert('Name and URL are required');
@@ -328,6 +342,7 @@ class SourceManager {
             if (type === 'xtream') {
                 data.username = username;
                 if (password) data.password = password;
+                data.fallbackUrls = fallbackUrls;
             }
 
             await API.sources.update(id, data);
@@ -585,7 +600,10 @@ class SourceManager {
             select.innerHTML = '<option value="">Select a source...</option>';
 
             sources.filter(s => s.type === 'xtream' || s.type === 'm3u').forEach(source => {
-                select.innerHTML += `<option value="${source.id}">${source.name} (${source.type})</option>`;
+                const option = document.createElement('option');
+                option.value = source.id;
+                option.textContent = `${source.name} (${source.type})`;
+                select.appendChild(option);
             });
         } catch (err) {
             console.error('Error loading content sources:', err);
@@ -746,9 +764,9 @@ class SourceManager {
                 return `
                     <label class="checkbox-label channel-item" title="${this.escapeHtml(item.name)}">
                         <input type="checkbox" class="channel-checkbox" 
-                               data-type="${item.type}" 
-                               data-id="${item.id}" 
-                               data-source-id="${this.treeData.sourceId}" 
+                               data-type="${this.escapeHtml(item.type)}"
+                               data-id="${this.escapeHtml(item.id)}"
+                               data-source-id="${this.escapeHtml(this.treeData.sourceId)}"
                                ${!itemHidden ? 'checked' : ''}>
                         <span class="channel-name">${this.escapeHtml(item.name)}</span>
                     </label>`;
@@ -760,11 +778,11 @@ class SourceManager {
             <div class="content-group ${isExpanded ? '' : 'collapsed'}" data-group-id="${this.escapeHtml(group.id)}">
                 <div class="content-group-header">
                     <span class="group-expander">${Icons.chevronDown}</span>
-                    <label class="checkbox-label" onclick="event.stopPropagation()">
+                    <label class="checkbox-label">
                         <input type="checkbox" class="group-checkbox" 
                                data-type="group" 
                                data-id="${this.escapeHtml(group.name)}" 
-                               data-source-id="${this.treeData.sourceId}" 
+                               data-source-id="${this.escapeHtml(this.treeData.sourceId)}"
                                ${checked ? 'checked' : ''}>
                         <span class="group-name">${this.escapeHtml(group.name)} (${group.items.length})</span>
                     </label>

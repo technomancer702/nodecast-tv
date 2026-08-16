@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+data
+transcode-cache
+node_modules
+coverage
+dist
+release
+user_data
+.vscode
+*.log
+npm-debug.log*

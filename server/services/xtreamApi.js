@@ -3,19 +3,54 @@
  * Handles authentication and API calls to Xtream servers
  */
 
+const DEFAULT_TIMEOUT_MS = 8000;
+const preferredUrls = new Map();
+const { fetchValidated } = require('./safeFetch');
+
+function normalizeBaseUrls(primaryUrl, fallbackUrls = []) {
+    const values = [primaryUrl];
+
+    if (Array.isArray(fallbackUrls)) {
+        values.push(...fallbackUrls);
+    } else if (typeof fallbackUrls === 'string') {
+        values.push(...fallbackUrls.split(/[\r\n,]+/));
+    }
+
+    return [...new Set(values
+        .filter(value => typeof value === 'string' && value.trim())
+        .map(value => value.trim().replace(/\/+$/, '')))];
+}
+
 class XtreamApi {
-    constructor(baseUrl, username, password) {
-        // Clean up base URL
-        this.baseUrl = baseUrl.replace(/\/+$/, '');
+    constructor(baseUrls, username, password, options = {}) {
+        const urls = Array.isArray(baseUrls)
+            ? normalizeBaseUrls(baseUrls[0], baseUrls.slice(1))
+            : normalizeBaseUrls(baseUrls);
+
+        if (urls.length === 0) {
+            throw new Error('At least one Xtream server URL is required');
+        }
+
+        const preferredUrl = options.preferredUrl?.replace(/\/+$/, '');
+        if (preferredUrl && urls.includes(preferredUrl)) {
+            urls.splice(urls.indexOf(preferredUrl), 1);
+            urls.unshift(preferredUrl);
+        }
+
+        this.baseUrls = urls;
+        this.baseUrl = urls[0];
         this.username = username;
         this.password = password;
+        this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+        this.onSuccess = options.onSuccess;
+        this.allowPrivate = options.allowPrivate;
     }
 
     /**
      * Build API URL with authentication
      */
-    buildApiUrl(action, params = {}) {
-        const url = new URL(`${this.baseUrl}/player_api.php`);
+    buildApiUrl(action, params = {}, baseUrl = this.baseUrl) {
+        const url = new URL(`${baseUrl}/player_api.php`);
         url.searchParams.set('username', this.username);
         url.searchParams.set('password', this.password);
         if (action) {
@@ -32,24 +67,51 @@ class XtreamApi {
     /**
      * Make API request
      */
-    async request(action, params = {}) {
-        const url = this.buildApiUrl(action, params);
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Xtream API error: ${response.status} ${response.statusText}`);
+    async request(action, params = {}, validate = null) {
+        const errors = [];
+
+        for (const baseUrl of this.baseUrls) {
+            const url = this.buildApiUrl(action, params, baseUrl);
+
+            try {
+                const response = await fetchValidated(url, {
+                    signal: AbortSignal.timeout(this.timeoutMs),
+                    preferHttps: true,
+                    allowPrivate: this.allowPrivate
+                });
+                if (!response.ok) {
+                    throw new Error(`${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                if (validate && !validate(data)) {
+                    throw new Error('Invalid credentials or server response');
+                }
+
+                this.baseUrl = baseUrl;
+                this.onSuccess?.(baseUrl);
+                return data;
+            } catch (error) {
+                errors.push(`${baseUrl}: ${error.message}`);
+            }
         }
-        return response.json();
+
+        throw new Error(`All Xtream DNS servers failed (${errors.join(' | ')})`);
     }
 
     /**
      * Authenticate and get server/user info
      */
     async authenticate() {
-        const data = await this.request(null);
-        if (!data.user_info) {
-            throw new Error('Invalid credentials or server response');
-        }
-        return data;
+        return this.request(null, {}, data => Boolean(data?.user_info));
+    }
+
+    /**
+     * Select the first responsive server before returning a direct stream URL.
+     */
+    async selectAvailable() {
+        await this.authenticate();
+        return this.baseUrl;
     }
 
     /**
@@ -147,15 +209,31 @@ class XtreamApi {
  * Factory function to create API instance from source
  */
 function createFromSource(source) {
-    return new XtreamApi(source.url, source.username, source.password);
+    const baseUrls = normalizeBaseUrls(source.url, source.fallbackUrls);
+    const preferredUrl = preferredUrls.get(String(source.id));
+
+    return new XtreamApi(baseUrls, source.username, source.password, {
+        preferredUrl,
+        onSuccess: (url) => preferredUrls.set(String(source.id), url)
+    });
 }
 
 /**
  * Static authenticate for testing
  */
-async function authenticate(url, username, password) {
-    const api = new XtreamApi(url, username, password);
+async function authenticate(url, username, password, fallbackUrls = []) {
+    const api = new XtreamApi(normalizeBaseUrls(url, fallbackUrls), username, password);
     return api.authenticate();
 }
 
-module.exports = { XtreamApi, createFromSource, authenticate };
+function clearPreferred(sourceId) {
+    preferredUrls.delete(String(sourceId));
+}
+
+module.exports = {
+    XtreamApi,
+    createFromSource,
+    authenticate,
+    normalizeBaseUrls,
+    clearPreferred
+};

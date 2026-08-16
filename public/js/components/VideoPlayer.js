@@ -1030,11 +1030,8 @@ class VideoPlayer {
             // 1. User enabled "Force Proxy" in settings
             // 2. Known CORS-restricted domains (like Pluto TV)
             // Note: Xtream sources are NOT auto-proxied because many providers IP-lock streams
-            const proxyRequiredDomains = ['pluto.tv'];
-            const needsProxy = this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain));
-
-            this.isUsingProxy = needsProxy;
-            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl) : streamUrl;
+            this.isUsingProxy = true;
+            const finalUrl = this.getProxiedUrl(streamUrl);
 
             // Detect if this is likely an HLS stream (has .m3u8 in URL)
             const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8');
@@ -1354,7 +1351,9 @@ class VideoPlayer {
      * Get proxied URL for a stream
      */
     getProxiedUrl(url) {
-        return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+        if (typeof url === 'string' && url.startsWith('/api/')) return url;
+        const safe = Security.safeUrl(url);
+        return safe ? `/api/proxy/stream?url=${encodeURIComponent(safe)}` : '';
     }
 
     /**
@@ -1449,7 +1448,7 @@ class VideoPlayer {
      */
     showError(message) {
         this.overlay.classList.remove('hidden');
-        this.overlay.querySelector('.overlay-content').innerHTML = `<p style="color: var(--color-error);">${message}</p>`;
+        this.overlay.querySelector('.overlay-content').innerHTML = `<p style="color: var(--color-error);">${Security.escapeHtml(message)}</p>`;
     }
 
     /**

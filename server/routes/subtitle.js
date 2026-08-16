@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
+const { resolvePlaybackUrl } = require('../services/playbackUrl');
 
 /**
  * Subtitle extraction endpoint
@@ -8,11 +9,18 @@ const { spawn } = require('child_process');
  * 
  * Extracts a specific subtitle track and converts it to WebVTT on the fly.
  */
-router.get('/', (req, res) => {
-    const { url, index } = req.query;
+router.get('/', async (req, res) => {
+    let { url } = req.query;
+    const { index } = req.query;
 
     if (!url || index === undefined) {
         return res.status(400).json({ error: 'URL and index parameters are required' });
+    }
+
+    try {
+        url = await resolvePlaybackUrl(url);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';

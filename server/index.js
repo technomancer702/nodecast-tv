@@ -1,14 +1,19 @@
 const express = require('express');
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const passport = require('passport');
 const syncService = require('./services/syncService');
+const { seedXtreamSourceFromEnv } = require('./services/sourceSeeder');
+const { getRuntimeSecret } = require('./services/runtimeSecret');
+const { createInlineScriptHash } = require('./services/contentSecurityPolicy');
 
 // Initialize database
 require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
 
 // Trust proxy headers (X-Forwarded-Proto, X-Forwarded-For, etc.)
 // Required for correct protocol detection behind reverse proxies (nginx, Caddy, etc.)
@@ -17,17 +22,63 @@ app.set('trust proxy', true);
 // Middleware
 app.use(express.json({ limit: '50mb' }));
 
+const publicDir = path.join(__dirname, '..', 'public');
+const inlineScriptHashes = ['index.html', 'login.html'].flatMap(file => {
+    const html = fs.readFileSync(path.join(publicDir, file), 'utf8');
+    return [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
+        .map(match => match[1])
+        .filter(script => script.trim())
+        .map(createInlineScriptHash);
+});
+
+app.use((req, res, next) => {
+    res.set({
+        'Content-Security-Policy': [
+            "default-src 'self'",
+            `script-src 'self' ${inlineScriptHashes.join(' ')}`,
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' blob:",
+            "connect-src 'self' blob:",
+            "worker-src 'self' blob:",
+            "font-src 'self' data:",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'"
+        ].join('; '),
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'no-referrer',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+    });
+    next();
+});
+
 // Initialize Passport
 const session = require('express-session');
 app.use(session({
-    secret: process.env.JWT_SECRET || 'keyboard cat',
+    secret: getRuntimeSecret(),
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false,
+    cookie: {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true'
+    }
 }));
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.get('/vendor/hls.min.js', (req, res) => {
+    res.type('application/javascript').sendFile(require.resolve('hls.js/dist/hls.min.js'));
+});
+
+app.use(express.static(publicDir, {
+    dotfiles: 'deny',
+    etag: true,
+    maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0
+}));
 
 // FFMPEG Configuration (optional - for transcoding support)
 // Priority: 1. System FFmpeg (better Docker DNS support), 2. ffmpeg-static npm package
@@ -89,7 +140,6 @@ app.locals.ffmpegPath = findFFmpeg();
 app.locals.ffprobePath = findFFprobe();
 
 // Dynamic services loader - collects exports from files in ./services
-const fs = require('fs');
 const services = {};
 try {
     const servicesDir = path.join(__dirname, 'services');
@@ -198,8 +248,12 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, async () => {
-    console.log(`NodeCast TV server running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, async () => {
+    console.log(`NodeCast TV server running on http://${HOST}:${PORT}`);
+
+    await seedXtreamSourceFromEnv().catch(err => {
+        console.error('[Seed] Failed to create the preconfigured Xtream source:', err.message);
+    });
 
     // Load plugins
     await loadPlugins().catch(err => {

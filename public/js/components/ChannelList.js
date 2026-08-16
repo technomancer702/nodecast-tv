@@ -33,12 +33,7 @@ class ChannelList {
      * Only proxies HTTP URLs when on HTTPS page
      */
     getProxiedImageUrl(url) {
-        if (!url || url.length === 0) return '/img/placeholder.png';
-        // Only proxy if we're on HTTPS and the image is HTTP
-        if (window.location.protocol === 'https:' && url.startsWith('http://')) {
-            return `/api/proxy/image?url=${encodeURIComponent(url)}`;
-        }
-        return url;
+        return Security.imageUrl(url);
     }
 
     /**
@@ -470,9 +465,9 @@ class ChannelList {
 
             html += `
         <div class="channel-group">
-          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${groupName}">
+          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${this.escapeHtml(groupName)}">
             <span class="group-toggle">${Icons.chevronDown}</span>
-            <span class="group-name">${groupName}</span>
+            <span class="group-name">${this.escapeHtml(groupName)}</span>
             <span class="group-count">${visibleChannels.length}</span>
           </div>
           <div class="group-channels">
@@ -502,15 +497,14 @@ class ChannelList {
 
                 html += `
           <div class="channel-item ${isActive ? 'active' : ''} ${isRenderActive ? 'nav-active' : ''} ${channelHidden ? 'hidden' : ''}" 
-               data-channel-id="${channel.id}"
-               data-source-id="${channel.sourceId}"
-               data-source-type="${channel.sourceType}"
-               data-stream-id="${channel.streamId || ''}"
-               data-url="${channel.url || ''}"
-               data-render-id="${renderId}"
-               data-render-group="${renderGroup}">
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+               data-channel-id="${this.escapeHtml(String(channel.id))}"
+               data-source-id="${this.escapeHtml(String(channel.sourceId))}"
+               data-source-type="${this.escapeHtml(channel.sourceType)}"
+               data-stream-id="${this.escapeHtml(String(channel.streamId || ''))}"
+               data-url="${this.escapeHtml(channel.url || '')}"
+               data-render-id="${this.escapeHtml(renderId)}"
+               data-render-group="${this.escapeHtml(renderGroup)}">
+            <img class="channel-logo" src="${this.escapeHtml(this.getProxiedImageUrl(channel.tvgLogo))}" alt="">
             <div class="channel-info">
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
@@ -615,15 +609,14 @@ class ChannelList {
 
             html += `
           <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''}" 
-               data-channel-id="${channel.id}"
-               data-source-id="${channel.sourceId}"
-               data-source-type="${channel.sourceType}"
-               data-stream-id="${channel.streamId || ''}"
-               data-url="${channel.url || ''}"
-               data-render-id="${renderId}"
-               data-render-group="${renderGroup}">
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+               data-channel-id="${this.escapeHtml(String(channel.id))}"
+               data-source-id="${this.escapeHtml(String(channel.sourceId))}"
+               data-source-type="${this.escapeHtml(channel.sourceType)}"
+               data-stream-id="${this.escapeHtml(String(channel.streamId || ''))}"
+               data-url="${this.escapeHtml(channel.url || '')}"
+               data-render-id="${this.escapeHtml(renderId)}"
+               data-render-group="${this.escapeHtml(renderGroup)}">
+            <img class="channel-logo" src="${this.escapeHtml(this.getProxiedImageUrl(channel.tvgLogo))}" alt="">
             <div class="channel-info">
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
@@ -733,7 +726,7 @@ class ChannelList {
             this.render();
         } catch (err) {
             console.error('Error loading channels:', err);
-            this.container.innerHTML = `<div class="empty-state"><p>Error loading channels</p><p class="hint">${err.message}</p></div>`;
+            this.container.innerHTML = `<div class="empty-state"><p>Error loading channels</p><p class="hint">${this.escapeHtml(err.message)}</p></div>`;
         } finally {
             this.isLoading = false;
         }
@@ -1040,11 +1033,10 @@ class ChannelList {
         div.dataset.url = channel.url || '';
 
         div.innerHTML = `
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <img class="channel-logo" src="${this.escapeHtml(this.getProxiedImageUrl(channel.tvgLogo))}" alt="">
             <div class="channel-info">
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
-              <div class="channel-program">${this.getProgramInfo(channel) || ''}</div>
+              <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
             </div>
             <button class="favorite-btn active" title="Remove from Favorites">
               ❤️
@@ -1293,11 +1285,10 @@ class ChannelList {
         modalBody.innerHTML = `
             <div class="epg-info-modal">
                 <div class="channel-details">
-                    <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                         onerror="this.onerror=null;this.src='/img/placeholder.png'" />
+                    <img class="channel-logo" src="${this.escapeHtml(this.getProxiedImageUrl(channel.tvgLogo))}" />
                     <div class="channel-meta">
                         <p><strong>Group:</strong> ${this.escapeHtml(channel.groupTitle || 'Uncategorized')}</p>
-                        <p><strong>Source:</strong> ${channel.sourceType}</p>
+                        <p><strong>Source:</strong> ${this.escapeHtml(channel.sourceType)}</p>
                         ${channel.tvgId ? `<p><strong>TVG ID:</strong> ${this.escapeHtml(channel.tvgId)}</p>` : ''}
                     </div>
                 </div>

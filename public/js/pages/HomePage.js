@@ -251,14 +251,13 @@ class HomePage {
     }
 
     createChannelTile(channel) {
-        const logo = channel.tvgLogo || '/img/placeholder.png';
-        const logoUrl = logo.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(logo)}` : logo;
-        const name = channel.name || 'Unknown';
+        const logoUrl = Security.imageUrl(channel.tvgLogo);
+        const name = Security.escapeHtml(channel.name || 'Unknown');
 
         return `
-            <div class="channel-tile" data-channel-id="${channel.id}" data-source-id="${channel.sourceId}">
+            <div class="channel-tile" data-channel-id="${Security.escapeAttribute(channel.id)}" data-source-id="${Security.escapeAttribute(channel.sourceId)}">
                 <div class="tile-logo">
-                    <img src="${logoUrl}" alt="${name}" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                    <img src="${Security.escapeAttribute(logoUrl)}" alt="${name}" loading="lazy">
                 </div>
                 <div class="tile-name" title="${name}">${name}</div>
             </div>
@@ -411,13 +410,14 @@ class HomePage {
         const percent = Math.min(100, Math.round((progress / duration) * 100));
 
         // Proxy the poster if it's an external URL
-        const poster = data.poster || '/img/poster-placeholder.jpg';
-        const posterUrl = poster.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(poster)}` : poster;
+        const posterUrl = Security.imageUrl(data.poster, '/img/poster-placeholder.jpg');
+        const title = Security.escapeHtml(item.name || data.title || 'Unknown Title');
+        const subtitle = Security.escapeHtml(data.subtitle || (type === 'movie' ? 'Movie' : 'Series'));
 
         return `
-            <div class="dashboard-card" data-id="${item_id}" data-type="${type}">
+            <div class="dashboard-card" data-id="${Security.escapeAttribute(item_id)}" data-type="${Security.escapeAttribute(type)}">
                 <div class="card-image">
-                    <img src="${posterUrl}" alt="${data.title || item.name}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <img src="${Security.escapeAttribute(posterUrl)}" alt="${title}" data-fallback="/img/poster-placeholder.jpg" loading="lazy">
                     <div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${percent}%"></div>
                     </div>
@@ -426,8 +426,8 @@ class HomePage {
                     </div>
                 </div>
                 <div class="card-info">
-                    <div class="card-title" title="${item.name || data.title}">${item.name || data.title || 'Unknown Title'}</div>
-                    <div class="card-subtitle">${data.subtitle || (type === 'movie' ? 'Movie' : 'Series')}</div>
+                    <div class="card-title" title="${title}">${title}</div>
+                    <div class="card-subtitle">${subtitle}</div>
                 </div>
             </div>
         `;
@@ -436,20 +436,21 @@ class HomePage {
     createRecentCard(item) {
         const { data, item_id } = item;
         const type = item.type || item.item_type;
-        const poster = item.stream_icon || data.poster || '/img/poster-placeholder.jpg';
-        const posterUrl = poster.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(poster)}` : poster;
+        const posterUrl = Security.imageUrl(item.stream_icon || data.poster, '/img/poster-placeholder.jpg');
+        const title = Security.escapeHtml(item.name || (data && data.title) || 'Unknown Title');
+        const subtitle = Security.escapeHtml((data && data.subtitle) || (type === 'movie' ? 'Movie' : 'Series'));
 
         return `
-            <div class="dashboard-card" data-id="${item_id}" data-type="${type}">
+            <div class="dashboard-card" data-id="${Security.escapeAttribute(item_id)}" data-type="${Security.escapeAttribute(type)}">
                 <div class="card-image">
-                    <img src="${posterUrl}" alt="${item.name}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <img src="${Security.escapeAttribute(posterUrl)}" alt="${title}" data-fallback="/img/poster-placeholder.jpg" loading="lazy">
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </div>
                 </div>
                 <div class="card-info">
-                    <div class="card-title" title="${item.name || (data && data.title)}">${item.name || (data && data.title) || 'Unknown Title'}</div>
-                    <div class="card-subtitle">${(data && data.subtitle) || (type === 'movie' ? 'Movie' : 'Series')}</div>
+                    <div class="card-title" title="${title}">${title}</div>
+                    <div class="card-subtitle">${subtitle}</div>
                 </div>
             </div>
         `;

@@ -180,7 +180,7 @@
                 Welcome! Please create your admin account to get started.
             </div>
 
-            <form id="login-form">
+            <form id="login-form" method="post" action="/api/auth/login">
                 <div class="form-group">
                     <label for="username">Username</label>
                     <input type="text" id="username" name="username" required autocomplete="username"

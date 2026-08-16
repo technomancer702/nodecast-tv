@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const { requireAuth } = require('../auth');
+
+router.use(requireAuth);
 const { getDb } = require('../db/sqlite');
 
 // Helper to map API item types to DB types and tables

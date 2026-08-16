@@ -4820,3 +4820,467 @@ kbd {
     max-width: 70px;
   }
 }
+/* =====================================================
+   Multi-view
+   ===================================================== */
+.multiview-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  height: 100%;
+  padding: var(--space-lg);
+  overflow: hidden;
+}
+
+.multiview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+}
+
+.multiview-header h2 {
+  font-size: 1.6rem;
+  margin-bottom: var(--space-xs);
+}
+
+.multiview-header p,
+.multiview-picker-header p {
+  color: var(--color-text-secondary);
+}
+
+.multiview-header-actions,
+.multiview-screen-count {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.multiview-screen-count {
+  padding: 4px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.multiview-screen-count span {
+  padding: 0 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.multiview-screen-count button {
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.multiview-screen-count button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.multiview-screen-count button.active {
+  color: white;
+  background: var(--color-accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.multiview-connection-warning {
+  padding: 10px 14px;
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: var(--radius-md);
+}
+
+.multiview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  flex: 1;
+  min-height: 0;
+}
+
+.multiview-grid.screens-1 {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.multiview-grid.screens-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.multiview-grid.screens-3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.multiview-grid.screens-3 .multiview-tile:first-child {
+  grid-row: 1 / span 2;
+}
+
+.multiview-grid.screens-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.multiview-tile.is-hidden {
+  display: none;
+}
+
+.multiview-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: #050507;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.multiview-tile.audio-active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), var(--shadow-glow);
+}
+
+.multiview-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.multiview-empty,
+.multiview-loading,
+.multiview-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  text-align: center;
+}
+
+.multiview-slot-number {
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.multiview-loading {
+  display: none;
+  z-index: 3;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.multiview-tile.is-loading .multiview-loading {
+  display: flex;
+}
+
+.multiview-tile.has-channel .multiview-empty {
+  display: none;
+}
+
+.multiview-tile-topbar,
+.multiview-tile-controls {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px 12px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+}
+
+.multiview-tile-topbar {
+  top: 0;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.85), transparent);
+}
+
+.multiview-tile-controls {
+  bottom: 0;
+  justify-content: flex-end;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+}
+
+.multiview-tile.has-channel:hover .multiview-tile-topbar,
+.multiview-tile.has-channel:hover .multiview-tile-controls,
+.multiview-tile.has-error .multiview-tile-topbar,
+.multiview-tile.has-error .multiview-tile-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.multiview-channel-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiview-control-btn,
+.multiview-icon-btn {
+  color: white;
+  background: rgba(20, 20, 28, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.multiview-control-btn {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+
+.multiview-icon-btn {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-full);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.multiview-control-btn:hover,
+.multiview-icon-btn:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent-hover);
+}
+
+.multiview-exit-fullscreen {
+  position: absolute;
+  z-index: 6;
+  top: 18px;
+  right: 18px;
+  display: none;
+  align-items: center;
+  min-height: 42px;
+  padding: 9px 14px;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  background: rgba(15, 15, 22, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+
+.multiview-exit-fullscreen:hover,
+.multiview-exit-fullscreen:focus-visible {
+  background: var(--color-accent);
+  border-color: var(--color-accent-hover);
+}
+
+.multiview-error {
+  display: none;
+  z-index: 3;
+  padding: var(--space-xl);
+  color: #fecaca;
+  background: rgba(20, 4, 7, 0.9);
+}
+
+.multiview-tile.has-error .multiview-error {
+  display: flex;
+}
+
+.multiview-picker {
+  position: fixed;
+  z-index: 300;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.multiview-picker.active {
+  display: flex;
+}
+
+.multiview-picker-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(780px, 90vh);
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.multiview-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.multiview-picker-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.3fr;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.multiview-channel-results {
+  overflow-y: auto;
+  padding: var(--space-sm);
+}
+
+.multiview-channel-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--color-text-primary);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.multiview-channel-option:hover {
+  background: var(--color-bg-hover);
+}
+
+.multiview-channel-option img {
+  width: 48px;
+  height: 36px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.multiview-channel-option span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.multiview-channel-option strong,
+.multiview-channel-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiview-channel-option small {
+  color: var(--color-text-secondary);
+}
+
+.multiview-picker-empty {
+  padding: var(--space-2xl);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.multiview-tile:fullscreen {
+  border: 0;
+  border-radius: 0;
+}
+
+.multiview-tile:fullscreen .multiview-exit-fullscreen,
+.multiview-tile:-webkit-full-screen .multiview-exit-fullscreen {
+  display: inline-flex;
+}
+
+@media (max-width: 768px) {
+  #page-multiview.active {
+    overflow-y: auto;
+  }
+
+  .multiview-shell {
+    height: auto;
+    min-height: 100%;
+    padding: var(--space-md);
+    overflow: visible;
+  }
+
+  .multiview-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .multiview-header p {
+    display: none;
+  }
+
+  .multiview-grid,
+  .multiview-grid.screens-1,
+  .multiview-grid.screens-2,
+  .multiview-grid.screens-3,
+  .multiview-grid.screens-4 {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  .multiview-grid.screens-3 .multiview-tile:first-child {
+    grid-row: auto;
+  }
+
+  .multiview-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .multiview-tile {
+    min-height: 220px;
+    aspect-ratio: 16 / 9;
+  }
+
+  .multiview-tile.has-channel .multiview-tile-topbar,
+  .multiview-tile.has-channel .multiview-tile-controls {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .multiview-picker {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .multiview-picker-panel {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .multiview-picker-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .multiview-picker-filters .search-input {
+    grid-column: 1 / -1;
+  }
+}

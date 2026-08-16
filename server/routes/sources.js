@@ -5,17 +5,29 @@ const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
 const syncService = require('../services/syncService');
 const m3uParser = require('../services/m3uParser');
+const { requireAuth, requireAdmin } = require('../auth');
+const { validateExternalUrl } = require('../services/externalUrl');
+const { fetchValidated } = require('../services/safeFetch');
+
+router.use(requireAuth);
+
+function sanitizeSource(source) {
+    if (!source) return source;
+    const { password, ...safe } = source;
+    return { ...safe, hasPassword: Boolean(password) };
+}
+
+async function validateSourceUrls(primaryUrl, fallbackUrls = []) {
+    const normalized = xtreamApi.normalizeBaseUrls(primaryUrl, fallbackUrls);
+    await Promise.all(normalized.map(value => validateExternalUrl(value)));
+    return normalized;
+}
 
 // Get all sources
 router.get('/', async (req, res) => {
     try {
         const allSources = await sources.getAll();
-        // Don't expose passwords in list view
-        const sanitized = allSources.map(s => ({
-            ...s,
-            password: s.password ? '••••••••' : null
-        }));
-        res.json(sanitized);
+        res.json(allSources.map(sanitizeSource));
     } catch (err) {
         console.error('Error getting sources:', err);
         res.status(500).json({ error: 'Failed to get sources' });
@@ -39,7 +51,7 @@ router.get('/status', async (req, res) => {
 router.get('/type/:type', async (req, res) => {
     try {
         const typeSources = await sources.getByType(req.params.type);
-        res.json(typeSources);
+        res.json(typeSources.map(sanitizeSource));
     } catch (err) {
         console.error('Error getting sources by type:', err);
         res.status(500).json({ error: 'Failed to get sources' });
@@ -53,7 +65,7 @@ router.get('/:id', async (req, res) => {
         if (!source) {
             return res.status(404).json({ error: 'Source not found' });
         }
-        res.json(source);
+        res.json(sanitizeSource(source));
     } catch (err) {
         console.error('Error getting source:', err);
         res.status(500).json({ error: 'Failed to get source' });
@@ -61,9 +73,9 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create source
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
     try {
-        const { type, name, url, username, password } = req.body;
+        const { type, name, url, username, password, fallbackUrls } = req.body;
 
         if (!type || !name || !url) {
             return res.status(400).json({ error: 'Type, name, and URL are required' });
@@ -73,42 +85,65 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        const source = await sources.create({ type, name, url, username, password });
+        const sourceData = { type, name, url, username, password };
+        if (type === 'xtream') {
+            const normalized = await validateSourceUrls(url, fallbackUrls);
+            sourceData.url = normalized[0];
+            sourceData.fallbackUrls = normalized.slice(1);
+        } else {
+            sourceData.url = (await validateExternalUrl(url)).href;
+        }
+
+        const source = await sources.create(sourceData);
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
-        res.status(201).json(source);
+        res.status(201).json(sanitizeSource(source));
     } catch (err) {
         console.error('Error creating source:', err);
-        res.status(500).json({ error: 'Failed to create source' });
+        res.status(400).json({ error: err.message || 'Failed to create source' });
     }
 });
 
 // Update source
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
     try {
         const existing = await sources.getById(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Source not found' });
         }
 
-        const { name, url, username, password } = req.body;
-        const updated = await sources.update(req.params.id, {
+        const { name, url, username, password, fallbackUrls } = req.body;
+        const updates = {
             name: name || existing.name,
             url: url || existing.url,
             username: username !== undefined ? username : existing.username,
             password: password !== undefined ? password : existing.password
-        });
+        };
+
+        if (existing.type === 'xtream') {
+            const normalized = await validateSourceUrls(
+                updates.url,
+                fallbackUrls !== undefined ? fallbackUrls : existing.fallbackUrls
+            );
+            updates.url = normalized[0];
+            updates.fallbackUrls = normalized.slice(1);
+            xtreamApi.clearPreferred(req.params.id);
+        } else {
+            updates.url = (await validateExternalUrl(updates.url)).href;
+        }
+
+        const updated = await sources.update(req.params.id, updates);
         // Trigger Sync (if critical fields changed? safely just trigger it)
         syncService.syncSource(parseInt(req.params.id)).catch(console.error);
-        res.json(updated);
+        res.json(sanitizeSource(updated));
     } catch (err) {
         console.error('Error updating source:', err);
-        res.status(500).json({ error: 'Failed to update source' });
+        res.status(400).json({ error: err.message || 'Failed to update source' });
     }
 });
 
 // Delete source
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
     try {
         const sourceId = parseInt(req.params.id);
         const existing = await sources.getById(sourceId);
@@ -141,7 +176,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // Toggle source enabled/disabled
-router.post('/:id/toggle', async (req, res) => {
+router.post('/:id/toggle', requireAdmin, async (req, res) => {
     try {
         const updated = await sources.toggleEnabled(req.params.id);
         if (!updated) {
@@ -153,7 +188,7 @@ router.post('/:id/toggle', async (req, res) => {
             syncService.syncSource(parseInt(req.params.id)).catch(console.error);
         }
 
-        res.json(updated);
+        res.json(sanitizeSource(updated));
     } catch (err) {
         console.error('Error toggling source:', err);
         res.status(500).json({ error: 'Failed to toggle source' });
@@ -161,7 +196,7 @@ router.post('/:id/toggle', async (req, res) => {
 });
 
 // Manual Sync
-router.post('/:id/sync', async (req, res) => {
+router.post('/:id/sync', requireAdmin, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const source = await sources.getById(id);
@@ -178,7 +213,7 @@ router.post('/:id/sync', async (req, res) => {
 });
 
 // Test source connection
-router.post('/:id/test', async (req, res) => {
+router.post('/:id/test', requireAdmin, async (req, res) => {
     try {
         const source = await sources.getById(req.params.id);
         if (!source) {
@@ -186,15 +221,16 @@ router.post('/:id/test', async (req, res) => {
         }
 
         if (source.type === 'xtream') {
-            const result = await xtreamApi.authenticate(source.url, source.username, source.password);
-            res.json({ success: true, data: result });
+            const api = xtreamApi.createFromSource(source);
+            const result = await api.authenticate();
+            res.json({ success: true, activeUrl: api.baseUrl, data: result });
         } else if (source.type === 'm3u') {
-            const response = await fetch(source.url);
+            const response = await fetchValidated(source.url, { preferHttps: true });
             const text = await response.text();
             const isValid = text.includes('#EXTM3U');
             res.json({ success: isValid, message: isValid ? 'Valid M3U playlist' : 'Invalid M3U format' });
         } else if (source.type === 'epg') {
-            const response = await fetch(source.url);
+            const response = await fetchValidated(source.url, { preferHttps: true });
             const text = await response.text();
             const isValid = text.includes('<tv') || text.includes('<?xml');
             res.json({ success: isValid, message: isValid ? 'Valid EPG XML' : 'Invalid EPG format' });
@@ -209,7 +245,7 @@ router.post('/:id/test', async (req, res) => {
 const M3U_LARGE_THRESHOLD = 50000;
 
 // Estimate by URL (for new sources before creation)
-router.post('/estimate', async (req, res) => {
+router.post('/estimate', requireAdmin, async (req, res) => {
     try {
         const { url, type } = req.body;
 
@@ -266,7 +302,7 @@ router.get('/:id/estimate', async (req, res) => {
 });
 
 // Global Sync - sync all enabled sources
-router.post('/sync-all', async (req, res) => {
+router.post('/sync-all', requireAdmin, async (req, res) => {
     try {
         // Trigger global sync (async - don't wait for completion)
         syncService.syncAll().catch(console.error);

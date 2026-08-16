@@ -538,11 +538,12 @@ class WatchPage {
         }
 
         // Determine if proxy is needed
-        const proxyRequiredDomains = ['pluto.tv'];
-        const needsProxy = settings.forceProxy || proxyRequiredDomains.some(domain => url.includes(domain));
-        const finalUrl = needsProxy ? `/api/proxy/stream?url=${encodeURIComponent(url)}` : url;
+        const isLocalApi = typeof url === 'string' && url.startsWith('/api/');
+        const safeUrl = isLocalApi ? url : Security.safeUrl(url);
+        const finalUrl = isLocalApi ? url : `/api/proxy/stream?url=${encodeURIComponent(safeUrl)}`;
+        const needsProxy = true;
 
-        console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls });
+        console.log('[WatchPage] Playing through the local security proxy:', { needsProxy, looksLikeHls });
 
         // Use HLS.js for HLS streams
         if (looksLikeHls && Hls.isSupported()) {
@@ -916,7 +917,7 @@ class WatchPage {
             if (track.kind === 'subtitles' || track.kind === 'captions') {
                 const label = track.label || track.language || `Track ${i + 1}`;
                 const isActive = track.mode === 'showing';
-                html += `<button class="captions-option ${isActive ? 'active' : ''}" data-index="${i}">${label}</button>`;
+                html += `<button class="captions-option ${isActive ? 'active' : ''}" data-index="${i}">${Security.escapeHtml(label)}</button>`;
             }
         }
 
@@ -1046,7 +1047,7 @@ class WatchPage {
             this.posterEl.onerror = null;
             this.posterEl.src = fallback;
         };
-        this.posterEl.src = this.content.poster || fallback;
+        this.posterEl.src = Security.imageUrl(this.content.poster, fallback);
         this.posterEl.alt = this.content.title || '';
         this.contentTitleEl.textContent = this.content.title || '';
         this.yearEl.textContent = this.content.year || '';
@@ -1139,11 +1140,10 @@ class WatchPage {
         if (!this.recommendedGrid) return;
 
         this.recommendedGrid.innerHTML = movies.map(movie => `
-            <div class="watch-recommended-card" data-id="${movie.stream_id}" data-source="${sourceId}">
-                <img src="${movie.stream_icon || movie.cover || '/img/placeholder.png'}" 
-                     alt="${movie.name}" 
-                     onerror="this.onerror=null;this.src='/img/placeholder.png'" loading="lazy">
-                <p>${movie.name}</p>
+            <div class="watch-recommended-card" data-id="${Security.escapeAttribute(movie.stream_id)}" data-source="${Security.escapeAttribute(sourceId)}">
+                <img src="${Security.escapeAttribute(Security.imageUrl(movie.stream_icon || movie.cover))}"
+                     alt="${Security.escapeAttribute(movie.name || '')}" loading="lazy">
+                <p>${Security.escapeHtml(movie.name || 'Unknown')}</p>
             </div>
         `).join('');
 
@@ -1199,7 +1199,7 @@ class WatchPage {
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                             <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
                         </svg>
-                        <span class="watch-season-name">Season ${seasonNum}</span>
+                        <span class="watch-season-name">Season ${Security.escapeHtml(seasonNum)}</span>
                         <span class="watch-season-count">${episodes.length} episodes</span>
                     </div>
                     <div class="watch-episode-list">
@@ -1208,13 +1208,13 @@ class WatchPage {
                     parseInt(ep.episode_num) === parseInt(this.currentEpisode);
                 return `
                                 <div class="watch-episode-item ${isActive ? 'active' : ''}" 
-                                     data-episode-id="${ep.id}" 
-                                     data-season="${seasonNum}"
-                                     data-episode="${ep.episode_num}"
-                                     data-container="${ep.container_extension || 'mp4'}">
-                                    <span class="watch-episode-num">E${ep.episode_num}</span>
-                                    <span class="watch-episode-title">${ep.title || `Episode ${ep.episode_num}`}</span>
-                                    <span class="watch-episode-duration">${ep.duration || ''}</span>
+                                     data-episode-id="${Security.escapeAttribute(ep.id)}"
+                                     data-season="${Security.escapeAttribute(seasonNum)}"
+                                     data-episode="${Security.escapeAttribute(ep.episode_num)}"
+                                     data-container="${Security.escapeAttribute(ep.container_extension || 'mp4')}">
+                                    <span class="watch-episode-num">E${Security.escapeHtml(ep.episode_num)}</span>
+                                    <span class="watch-episode-title">${Security.escapeHtml(ep.title || `Episode ${ep.episode_num}`)}</span>
+                                    <span class="watch-episode-duration">${Security.escapeHtml(ep.duration || '')}</span>
                                 </div>
                             `;
             }).join('')}

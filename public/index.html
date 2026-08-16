@@ -10,13 +10,13 @@
   <title>nodecast-tv | IPTV Player</title>
   <meta name="description" content="Stream live TV, movies, and series with EPG support">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/main.css?v=3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
     rel="stylesheet">
   <!-- HLS.js for video playback -->
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+  <script src="/vendor/hls.min.js"></script>
 </head>
 
 <body>
@@ -57,6 +57,13 @@
                 d="M21 6h-7.59l3.29-3.29L16 2l-4 4-4-4-.71.71L10.59 6H3a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8a2 2 0 0 0-2-2zm0 14H3V8h18v12zM9 10v8l7-4z" />
             </svg></span>
           <span>Live TV</span>
+        </a>
+        <a href="#" class="nav-link" data-page="multiview">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+              class="icon">
+              <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" />
+            </svg></span>
+          <span>Multi-telas</span>
         </a>
         <a href="#" class="nav-link" data-page="guide">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
@@ -284,6 +291,56 @@
               </div>
             </div>
           </section>
+        </div>
+      </div>
+
+      <!-- Multi-view Page -->
+      <div id="page-multiview" class="page">
+        <div class="multiview-shell">
+          <header class="multiview-header">
+            <div>
+              <h2>Multi-telas</h2>
+              <p>Assista a até quatro canais ao vivo. Apenas uma tela reproduz áudio por vez.</p>
+            </div>
+            <div class="multiview-header-actions">
+              <div class="multiview-screen-count" aria-label="Quantidade de telas">
+                <span>Telas</span>
+                <button data-screen-count="1" aria-label="Usar uma tela">1</button>
+                <button data-screen-count="2" aria-label="Usar duas telas">2</button>
+                <button data-screen-count="3" aria-label="Usar três telas">3</button>
+                <button data-screen-count="4" aria-label="Usar quatro telas">4</button>
+              </div>
+              <button class="btn btn-secondary" id="multiview-stop-all">Parar todas</button>
+            </div>
+          </header>
+
+          <div class="multiview-connection-warning">
+            Cada tela utiliza uma conexão do seu provedor. Seu plano precisa permitir transmissões simultâneas.
+          </div>
+
+          <div class="multiview-grid" id="multiview-grid"></div>
+        </div>
+
+        <div class="multiview-picker" id="multiview-picker" aria-hidden="true">
+          <div class="multiview-picker-panel" role="dialog" aria-modal="true" aria-labelledby="multiview-picker-title">
+            <div class="multiview-picker-header">
+              <div>
+                <h3 id="multiview-picker-title">Escolher canal</h3>
+                <p id="multiview-picker-count">Carregando canais...</p>
+              </div>
+              <button class="multiview-icon-btn" id="multiview-picker-close" aria-label="Fechar">&times;</button>
+            </div>
+            <div class="multiview-picker-filters">
+              <select id="multiview-source-filter" class="source-select">
+                <option value="">Todas as fontes</option>
+              </select>
+              <select id="multiview-group-filter" class="source-select">
+                <option value="">Todas as categorias</option>
+              </select>
+              <input id="multiview-search" class="search-input" type="search" placeholder="Buscar canal...">
+            </div>
+            <div class="multiview-channel-results" id="multiview-channel-results"></div>
+          </div>
         </div>
       </div>
 
@@ -1095,6 +1152,7 @@
   </div>
 
   <!-- JavaScript -->
+  <script src="/js/security.js"></script>
   <script src="/js/icons.js"></script>
   <script src="/js/api.js?v=2"></script>
   <script src="/js/components/VideoPlayer.js?v=2"></script>
@@ -1103,12 +1161,13 @@
   <script src="/js/components/EpgGuide.js?v=2"></script>
   <script src="/js/pages/HomePage.js?v=2"></script>
   <script src="/js/pages/LivePage.js?v=2"></script>
+  <script src="/js/pages/MultiViewPage.js?v=2"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=4"></script>
   <script src="/js/pages/SeriesPage.js?v=1"></script>
   <script src="/js/pages/Settings.js?v=2"></script>
   <script src="/js/pages/WatchPage.js?v=1"></script>
-  <script src="/js/app.js?v=4"></script>
+  <script src="/js/app.js?v=5"></script>
   <script>
     // Check for SSO token in URL
     (function () {

@@ -36,8 +36,10 @@ const API = {
         }
 
         if (!response.ok) {
-            // If unauthorized, redirect to login
-            if (response.status === 401) {
+            // Only an authentication failure issued by NodeCast invalidates the
+            // local session. A provider may also return 401 for a stream; that
+            // error must not sign the user out of the application.
+            if (response.status === 401 && result.code === 'AUTH_REQUIRED') {
                 localStorage.removeItem('authToken');
                 window.location.href = '/login.html';
                 return;

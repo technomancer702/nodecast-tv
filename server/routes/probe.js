@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { resolvePlaybackUrl } = require('../services/playbackUrl');
+const { publicUrlLabel } = require('../services/externalUrl');
 const { spawn } = require('child_process');
 
 /**
@@ -140,9 +142,16 @@ function analyzeProbeResult(probeResult, url) {
 }
 
 router.get('/', async (req, res) => {
-    const { url, ua } = req.query;
+    let { url } = req.query;
+    const { ua } = req.query;
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
+    }
+
+    try {
+        url = await resolvePlaybackUrl(url);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
 
     const ffprobePath = req.app.locals.ffprobePath;
@@ -164,11 +173,11 @@ router.get('/', async (req, res) => {
     // Check cache
     const cached = probeCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
-        console.log(`[Probe] Cache hit for: ${url.substring(0, 50)}...`);
+        console.log(`[Probe] Cache hit for: ${publicUrlLabel(url)}`);
         return res.json(cached.result);
     }
 
-    console.log(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
+    console.log(`[Probe] Probing: ${publicUrlLabel(url)} ${ua ? '(custom UA)' : ''}`);
 
     try {
         const probeResult = await probeStream(url, ffprobePath, ua);

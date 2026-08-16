@@ -18,6 +18,7 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const EventEmitter = require('events');
 const hwDetect = require('./hwDetect');
+const { publicUrlLabel } = require('./externalUrl');
 
 // Session storage
 const sessions = new Map();
@@ -89,7 +90,7 @@ class TranscodeSession extends EventEmitter {
         }
 
         this.status = 'starting';
-        console.log(`[TranscodeSession ${this.id}] Starting session for: ${this.url}`);
+        console.log(`[TranscodeSession ${this.id}] Starting session for: ${publicUrlLabel(this.url)}`);
 
         // Create session directory
         try {
@@ -103,7 +104,6 @@ class TranscodeSession extends EventEmitter {
         // Build FFmpeg arguments for HLS output
         const args = this.buildFFmpegArgs();
 
-        console.log(`[TranscodeSession ${this.id}] Command: ${this.options.ffmpegPath} ${args.join(' ')}`);
 
         try {
             this.process = spawn(this.options.ffmpegPath, args, {

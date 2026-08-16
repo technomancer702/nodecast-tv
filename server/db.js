@@ -3,17 +3,23 @@ const path = require('path');
 const { existsSync, mkdirSync } = require('fs');
 
 // Ensure data directory exists (sync is fine for startup)
-const dataDir = path.join(__dirname, '..', 'data');
+const dataDir = process.env.NODECAST_DATA_DIR
+  ? path.resolve(process.env.NODECAST_DATA_DIR)
+  : path.join(__dirname, '..', 'data');
 if (!existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });
 }
 
 const dbPath = path.join(dataDir, 'db.json');
+let dbCache = null;
+let loadPromise = null;
 
 // Initialize database structure
 async function loadDb() {
-  try {
-    // Check if file exists (using fs.access is better for async, but we can catch ENOENT)
+  if (dbCache) return dbCache;
+  if (loadPromise) return loadPromise;
+
+  loadPromise = (async () => {
     try {
       const fileContent = await fs.readFile(dbPath, 'utf-8');
       const data = JSON.parse(fileContent);
@@ -39,17 +45,24 @@ async function loadDb() {
       }
       throw error;
     }
+  })();
+
+  try {
+    dbCache = await loadPromise;
+    return dbCache;
   } catch (err) {
     console.error('Error loading database:', err);
-    // Return safe default on error to prevent crashing, but log it
-    return {
-      sources: [],
-      hiddenItems: [],
-      favorites: [],
-      settings: getDefaultSettings(),
-      users: [],
-      nextId: 1
+    dbCache = {
+        sources: [],
+        hiddenItems: [],
+        favorites: [],
+        settings: getDefaultSettings(),
+        users: [],
+        nextId: 1
     };
+    return dbCache;
+  } finally {
+    loadPromise = null;
   }
 }
 
@@ -106,10 +119,15 @@ let writeQueue = Promise.resolve();
 const tmpPath = dbPath + '.tmp';
 
 async function saveDb(data) {
+  // Keep one shared in-memory document for the process. Previously, concurrent
+  // read-modify-write operations could each load a separate snapshot and the
+  // later write could silently remove a source created by the earlier one.
+  dbCache = data;
+  const jsonString = JSON.stringify(data, null, 2);
+
   // Queue this write operation - each write waits for the previous one
   writeQueue = writeQueue.then(async () => {
     try {
-      const jsonString = JSON.stringify(data, null, 2);
       // Atomic write: write to temp file, then rename
       // Rename is atomic on most filesystems, preventing corruption on crash
       await fs.writeFile(tmpPath, jsonString);

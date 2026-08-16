@@ -155,7 +155,7 @@ async function parse(input) {
  * @returns {Promise<{ channels: Array, groups: Array }>}
  */
 async function fetchAndParse(url) {
-    const response = await fetch(url);
+    const response = await fetchValidated(url, { preferHttps: true });
     if (!response.ok) {
         throw new Error(`Failed to fetch M3U: ${response.status} ${response.statusText}`);
     }
@@ -254,7 +254,7 @@ async function* parseStreaming(input, batchSize = 500) {
  * @yields {{ channels: Array, groups: Set, isLast: boolean }}
  */
 async function* fetchAndParseStreaming(url, batchSize = 500) {
-    const response = await fetch(url);
+    const response = await fetchValidated(url, { preferHttps: true });
     if (!response.ok) {
         throw new Error(`Failed to fetch M3U: ${response.status} ${response.statusText}`);
     }
@@ -278,7 +278,8 @@ async function* fetchAndParseStreaming(url, batchSize = 500) {
  * @returns {Promise<number>} Number of entries
  */
 async function countEntries(url) {
-    const response = await fetch(url, {
+    const response = await fetchValidated(url, {
+        preferHttps: true,
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -314,3 +315,4 @@ async function countEntries(url) {
 
 module.exports = { parse, parseExtinf, fetchAndParse, parseStreaming, fetchAndParseStreaming, countEntries };
 
+const { fetchValidated } = require('./safeFetch');

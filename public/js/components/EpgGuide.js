@@ -43,12 +43,7 @@ class EpgGuide {
      * Only proxies HTTP URLs when on HTTPS page
      */
     getProxiedImageUrl(url) {
-        if (!url || url.length === 0) return '/img/placeholder.png';
-        // Only proxy if we're on HTTPS and the image is HTTP
-        if (window.location.protocol === 'https:' && url.startsWith('http://')) {
-            return `/api/proxy/image?url=${encodeURIComponent(url)}`;
-        }
-        return url;
+        return Security.imageUrl(url);
     }
 
     init() {
@@ -186,7 +181,7 @@ class EpgGuide {
             this.container.innerHTML = `
         <div class="empty-state">
           <p>Error loading EPG</p>
-          <p class="hint">${err.message}</p>
+          <p class="hint">${Security.escapeHtml(err.message)}</p>
         </div>
       `;
         }
@@ -212,9 +207,7 @@ class EpgGuide {
         // Load EPG from ALL sources in parallel
         const fetchPromises = sources.map(async (source) => {
             try {
-                const response = await fetch(`/api/proxy/epg/${source.id}${queryParams}`);
-                if (!response.ok) throw new Error(`Status ${response.status}`);
-                return await response.json();
+                return await API.request('GET', `/proxy/epg/${source.id}${queryParams}`);
             } catch (e) {
                 console.warn(`Failed to load EPG for source ${source.name}:`, e);
                 return null;
@@ -387,16 +380,17 @@ class EpgGuide {
         if (this.groupSelect && this._lastGroupsKey !== groupsKey) {
             this._lastGroupsKey = groupsKey;
             const currentValue = this.selectedGroup;
-            let optionsHtml = '';
-
-            if (hasFavorites) {
-                optionsHtml += `<option value="Favorites" ${currentValue === 'Favorites' ? 'selected' : ''}>Favorites</option>`;
-            }
-
-            optionsHtml += `<option value="" ${currentValue === '' ? 'selected' : ''}>All Groups</option>`;
-            optionsHtml += groups.map(g => `<option value="${g}" ${g === currentValue ? 'selected' : ''}>${g}</option>`).join('');
-
-            this.groupSelect.innerHTML = optionsHtml;
+            this.groupSelect.replaceChildren();
+            const addOption = (value, label) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = label;
+                option.selected = value === currentValue;
+                this.groupSelect.appendChild(option);
+            };
+            if (hasFavorites) addOption('Favorites', 'Favorites');
+            addOption('', 'All Groups');
+            groups.forEach(group => addOption(group, group));
         } else if (this.groupSelect) {
             // Just update the selected value without rebuilding
             this.groupSelect.value = this.selectedGroup;
@@ -595,9 +589,8 @@ class EpgGuide {
             <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
               ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
             </button>
-            <img class="epg-channel-logo" src="${logo}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
-            <span class="epg-channel-name">${name}</span>
+            <img class="epg-channel-logo" src="${Security.escapeAttribute(logo)}" alt="">
+            <span class="epg-channel-name">${Security.escapeHtml(name)}</span>
             <div class="resize-handle"></div>
           </div>
           <div class="epg-programs">
@@ -806,11 +799,11 @@ class EpgGuide {
             html += `
         <div class="epg-program ${isCurrent ? 'current' : ''}" 
              style="width: ${width}px;"
-             data-title="${prog.title || ''}"
-             data-description="${prog.description || ''}"
-             data-start="${prog.start}"
-             data-stop="${prog.stop}">
-          <div class="epg-program-title">${prog.title || 'Unknown'}</div>
+             data-title="${Security.escapeAttribute(prog.title || '')}"
+             data-description="${Security.escapeAttribute(prog.description || '')}"
+             data-start="${Security.escapeAttribute(prog.start)}"
+             data-stop="${Security.escapeAttribute(prog.stop)}">
+          <div class="epg-program-title">${Security.escapeHtml(prog.title || 'Unknown')}</div>
           <div class="epg-program-time">
             ${new Date(prog.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
@@ -899,7 +892,7 @@ class EpgGuide {
         body.innerHTML = `
       <p><strong>Time:</strong> ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
       <p><strong>Description:</strong></p>
-      <p>${data.description || 'No description available'}</p>
+      <p>${Security.escapeHtml(data.description || 'No description available')}</p>
     `;
 
         footer.innerHTML = '<button class="btn btn-secondary" id="modal-close">Close</button>';

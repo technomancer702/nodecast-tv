@@ -11,7 +11,33 @@ const http = require('http');
 const https = require('https');
 const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
-const { Readable } = require('stream');
+const { fetchValidated } = require('../services/safeFetch');
+const { sealUrl, unsealUrl } = require('../services/urlToken');
+const { publicUrlLabel } = require('../services/externalUrl');
+const { requireAuth } = require('../auth');
+
+function streamProxyPath(url, format = '') {
+    if (!url) return null;
+    const formatHint = format ? `&format=${encodeURIComponent(format)}` : '';
+    return `/api/proxy/stream?token=${encodeURIComponent(sealUrl(url))}${formatHint}`;
+}
+
+router.use('/xtream', requireAuth);
+router.use('/m3u', requireAuth);
+router.use('/epg', requireAuth);
+router.use('/cache', requireAuth);
+
+function sanitizeXtreamAuth(data) {
+    if (!data || typeof data !== 'object') return data;
+    const userInfo = data.user_info && typeof data.user_info === 'object'
+        ? { ...data.user_info }
+        : data.user_info;
+    if (userInfo) {
+        delete userInfo.username;
+        delete userInfo.password;
+    }
+    return { ...data, user_info: userInfo };
+}
 
 // Default cache max age in hours
 const DEFAULT_MAX_AGE_HOURS = 24;
@@ -36,7 +62,7 @@ function getCategoriesFromDb(sourceId, type, includeHidden = false) {
 function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = false) {
     const db = getDb();
     let query = `
-        SELECT item_id, name, stream_icon, added_at, rating, container_extension, year, category_id, data
+        SELECT item_id, name, stream_icon, stream_url, added_at, rating, container_extension, year, category_id, data
         FROM playlist_items 
         WHERE source_id = ? AND type = ?
     `;
@@ -66,6 +92,7 @@ function getStreamsFromDb(sourceId, type, categoryId = null, includeHidden = fal
             series_id: type === 'series' ? item.item_id : undefined,
             name: item.name,
             stream_icon: item.stream_icon,
+            stream_url: item.stream_url,
             cover: item.stream_icon, // series/vod often use cover
             added: item.added_at,
             rating: item.rating,
@@ -89,12 +116,12 @@ router.get('/xtream/:sourceId', async (req, res) => {
         // Proxy auth check to upstream to ensure credentials are still valid
 
         const cached = cache.get('xtream', source.id, 'auth', 300000);
-        if (cached) return res.json(cached);
+        if (cached) return res.json(sanitizeXtreamAuth(cached));
 
         const api = xtreamApi.createFromSource(source);
         const data = await api.authenticate();
         cache.set('xtream', source.id, 'auth', data);
-        res.json(data);
+        res.json(sanitizeXtreamAuth(data));
     } catch (err) {
         res.status(502).json({ error: 'Upstream error', details: err.message });
     }
@@ -244,8 +271,9 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
         // Format: http://server:port/movie/username/password/streamId.container (for movie)
         // Format: http://server:port/series/username/password/streamId.container (for series)
 
+        const api = xtreamApi.createFromSource(source);
+        const baseUrl = await api.selectAvailable();
         let streamUrl;
-        const baseUrl = source.url.replace(/\/$/, ''); // Remove trailing slash
 
         if (type === 'live') {
             streamUrl = `${baseUrl}/live/${source.username}/${source.password}/${streamId}.${container}`;
@@ -257,7 +285,9 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
             return res.status(400).json({ error: 'Invalid stream type' });
         }
 
-        res.json({ url: streamUrl });
+        // Keep provider credentials on the server. The browser receives only an
+        // authenticated opaque token that becomes invalid when NodeCast restarts.
+        res.json({ url: streamProxyPath(streamUrl, container) });
     } catch (err) {
         console.error('Error getting stream URL:', err);
         res.status(500).json({ error: 'Failed to get stream URL' });
@@ -288,13 +318,16 @@ router.get('/m3u/:sourceId', async (req, res) => {
         // }
         // Note: DB `live` items from M3U sync have `category_id` as their group name usually.
 
-        const reformattedChannels = channels.map(c => ({
-            ...c,
-            id: c.stream_id,
-            groupTitle: c.category_id || 'Uncategorized',
-            url: c.stream_url || c.url,
-            tvgLogo: c.stream_icon
-        }));
+        const reformattedChannels = channels.map(c => {
+            const { stream_url: streamUrl, ...safeChannel } = c;
+            return {
+                ...safeChannel,
+                id: c.stream_id,
+                groupTitle: c.category_id || 'Uncategorized',
+                url: streamProxyPath(streamUrl || c.url, c.container_extension || 'm3u8'),
+                tvgLogo: c.stream_icon
+            };
+        });
 
         const reformattedGroups = groups.map(g => ({
             id: g.category_id,
@@ -465,7 +498,7 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
             cache.set('xtream', sourceId, cacheKey, data);
         }
 
-        res.json(data);
+        res.json(action === 'auth' ? sanitizeXtreamAuth(data) : data);
     } catch (err) {
         console.error('Xtream proxy error:', err);
         res.status(500).json({ error: err.message });
@@ -484,11 +517,12 @@ router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
         }
 
         const api = xtreamApi.createFromSource(source);
+        await api.selectAvailable();
         const { streamId, type = 'live' } = req.params;
         const { container = 'm3u8' } = req.query;
 
         const url = api.buildStreamUrl(streamId, type, container);
-        res.json({ url });
+        res.json({ url: streamProxyPath(url, container) });
     } catch (err) {
         console.error('Stream URL error:', err);
         res.status(500).json({ error: err.message });
@@ -526,6 +560,7 @@ router.get('/epg/:sourceId', async (req, res) => {
         let url = source.url;
         if (source.type === 'xtream') {
             const api = xtreamApi.createFromSource(source);
+            await api.selectAvailable();
             url = api.getXmltvUrl();
         }
 
@@ -603,9 +638,16 @@ router.get('/stream', async (req, res) => {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            let { url } = req.query;
+            let { url, token } = req.query;
+            if (token) {
+                try {
+                    url = unsealUrl(token);
+                } catch (error) {
+                    return res.status(400).json({ error: error.message });
+                }
+            }
             if (!url) {
-                return res.status(400).json({ error: 'URL required' });
+                return res.status(400).json({ error: 'Stream token required' });
             }
 
             // Forward some headers to be more "transparent" back to the origin
@@ -628,7 +670,11 @@ router.get('/stream', async (req, res) => {
                 headers['Range'] = rangeHeader;
             }
 
-            const response = await fetch(url, { headers });
+            const response = await fetchValidated(url, {
+                headers,
+                signal: AbortSignal.timeout(15000),
+                preferHttps: true
+            });
 
             // Retry on 5xx errors (transient upstream issues)
             if (response.status >= 500 && attempt < maxRetries) {
@@ -638,7 +684,7 @@ router.get('/stream', async (req, res) => {
             }
 
             if (!response.ok) {
-                console.error(`Upstream error for ${url.substring(0, 80)}...: ${response.status} ${response.statusText}`);
+                console.error(`Upstream error for ${publicUrlLabel(url)}: ${response.status} ${response.statusText}`);
                 if (response.status === 403) {
                     const errorBody = await response.text().catch(() => 'N/A');
                     console.error(`403 Response body: ${errorBody.substring(0, 200)}`);
@@ -699,7 +745,7 @@ router.get('/stream', async (req, res) => {
 
                 const buffer = Buffer.concat(chunks);
                 const finalUrl = response.url || url;
-                console.log(`[Proxy] Processing HLS manifest from: ${finalUrl.substring(0, 80)}...`);
+                console.log(`[Proxy] Processing HLS manifest from: ${publicUrlLabel(finalUrl)}`);
                 res.set('Content-Type', 'application/vnd.apple.mpegurl');
 
                 let manifest = buffer.toString('utf-8');
@@ -716,7 +762,7 @@ router.get('/stream', async (req, res) => {
                             return line.replace(/URI=["']([^"']+)["']/g, (match, p1) => {
                                 try {
                                     const absoluteUrl = new URL(p1, baseUrl).href;
-                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}"`;
+                                    return `URI="${streamProxyPath(absoluteUrl)}"`;
                                 } catch (e) {
                                     return match;
                                 }
@@ -733,7 +779,7 @@ router.get('/stream', async (req, res) => {
                         } else {
                             absoluteUrl = new URL(trimmed, baseUrl).href;
                         }
-                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}`;
+                        return streamProxyPath(absoluteUrl);
                     } catch (e) { return line; }
                 }).join('\n');
 
@@ -788,7 +834,7 @@ router.get('/image', async (req, res) => {
             return res.status(400).json({ error: 'URL required' });
         }
 
-        const response = await fetch(url, {
+        const response = await fetchValidated(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'image/*,*/*;q=0.8'
@@ -799,20 +845,32 @@ router.get('/image', async (req, res) => {
             return res.status(response.status).send('Failed to fetch image');
         }
 
-        const contentType = response.headers.get('content-type') || 'image/png';
+        const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        const allowedTypes = new Set([
+            'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+            'image/avif', 'image/bmp', 'image/x-icon', 'image/vnd.microsoft.icon'
+        ]);
+        if (!allowedTypes.has(contentType)) {
+            return res.status(415).send('Unsupported image type');
+        }
+
+        const declaredLength = Number(response.headers.get('content-length') || 0);
+        if (declaredLength > 10 * 1024 * 1024) {
+            return res.status(413).send('Image is too large');
+        }
+
         res.set('Content-Type', contentType);
         res.set('Access-Control-Allow-Origin', '*');
         res.set('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
 
-        // Efficiently pipe the response body
-        if (response.body) {
-            // response.body is an AsyncIterable in standard fetch/undici
-            // Readable.from converts it to a Node.js Readable stream
-            const stream = Readable.from(response.body);
-            stream.pipe(res);
-        } else {
-            res.end();
+        const chunks = [];
+        let total = 0;
+        for await (const chunk of response.body || []) {
+            total += chunk.byteLength;
+            if (total > 10 * 1024 * 1024) return res.status(413).send('Image is too large');
+            chunks.push(Buffer.from(chunk));
         }
+        res.send(Buffer.concat(chunks));
 
     } catch (err) {
         console.error('Image proxy error:', err.message);

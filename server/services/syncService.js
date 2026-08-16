@@ -3,6 +3,7 @@ const { sources, settings } = require('../db'); // For source config and setting
 const xtreamApi = require('./xtreamApi');
 const m3uParser = require('./m3uParser');
 const epgParser = require('./epgParser');
+const { publicUrlLabel } = require('./externalUrl');
 
 // Sync tracking
 const activeSyncs = new Set(); // sourceId
@@ -389,7 +390,7 @@ class SyncService {
      * Processes EPG files in batches to avoid OOM on large EPG data
      */
     async syncEpgFromUrl(sourceId, url) {
-        console.log(`[Sync] Fetching EPG from: ${url.substring(0, 60)}...`);
+        console.log(`[Sync] Fetching EPG from: ${publicUrlLabel(url)}`);
 
         // Temporary memory logging for verification
         const logMemory = () => {

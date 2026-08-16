@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs').promises;
 const db = require('../db');
 const transcodeSession = require('../services/transcodeSession');
+const { resolvePlaybackUrl } = require('../services/playbackUrl');
+const { publicUrlLabel } = require('../services/externalUrl');
 
 /**
  * Transcode Routes
@@ -29,10 +31,17 @@ transcodeSession.startCleanupInterval();
  * Body: { url: string, seekOffset?: number }
  */
 router.post('/session', async (req, res) => {
-    const { url, seekOffset, videoMode, videoCodec, audioCodec, audioChannels } = req.body;
+    let { url } = req.body;
+    const { seekOffset, videoMode, videoCodec, audioCodec, audioChannels } = req.body;
 
     if (!url) {
         return res.status(400).json({ error: 'URL is required' });
+    }
+
+    try {
+        url = await resolvePlaybackUrl(url);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
@@ -160,9 +169,15 @@ router.get('/sessions', (req, res) => {
  * This fixes playback issues with Dolby/AC3/EAC3 audio that browsers can't decode.
  */
 router.get('/', async (req, res) => {
-    const { url } = req.query;
+    let { url } = req.query;
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
+    }
+
+    try {
+        url = await resolvePlaybackUrl(url);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
@@ -171,7 +186,7 @@ router.get('/', async (req, res) => {
     const settings = await db.settings.get();
     const userAgent = db.getUserAgent(settings);
 
-    console.log(`[Transcode] Starting transcoding for: ${url}`);
+    console.log(`[Transcode] Starting transcoding for: ${publicUrlLabel(url)}`);
     console.log(`[Transcode] Using User-Agent: ${settings.userAgentPreset}`);
     console.log(`[Transcode] Using binary: ${ffmpegPath}`);
 
@@ -220,7 +235,6 @@ router.get('/', async (req, res) => {
         '-' // Output to stdout
     ];
 
-    console.log(`[Transcode] Full command: ${ffmpegPath} ${args.join(' ')}`);
 
     let ffmpeg;
     try {

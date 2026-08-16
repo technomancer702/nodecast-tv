@@ -363,19 +363,31 @@ class SettingsPage {
                 <tr>
                     <td>
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <strong>${user.username}</strong>
+                            <strong>${Security.escapeHtml(user.username)}</strong>
                             ${typeBadge}
                         </div>
                     </td>
-                    <td>${user.email || '<span class="hint">-</span>'}</td>
+                    <td>${user.email ? Security.escapeHtml(user.email) : '<span class="hint">-</span>'}</td>
                     <td>${roleBadge}</td>
                     <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
-                        <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
+                        <button class="btn btn-sm btn-secondary" data-user-action="edit" data-user-id="${Security.escapeAttribute(user.id)}">Edit</button>
+                        <button class="btn btn-sm btn-error" data-user-action="delete" data-user-id="${Security.escapeAttribute(user.id)}">Delete</button>
                     </td>
                 </tr>
             `}).join('');
+
+            userList.querySelectorAll('[data-user-action]').forEach(button => {
+                const userId = Number(button.dataset.userId);
+                if (button.dataset.userAction === 'edit') {
+                    button.addEventListener('click', () => this.openEditUserModal(userId));
+                } else {
+                    button.addEventListener('click', () => {
+                        const user = this.users.find(item => Number(item.id) === userId);
+                        this.deleteUser(userId, user?.username || 'this user');
+                    });
+                }
+            });
         } catch (err) {
             console.error('Error loading users:', err);
             userList.innerHTML = '<tr><td colspan="5" class="hint">Error loading users</td></tr>';

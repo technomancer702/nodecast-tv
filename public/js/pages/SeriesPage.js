@@ -288,16 +288,16 @@ class SeriesPage {
             card.dataset.seriesId = series.series_id;
             card.dataset.sourceId = series.sourceId;
 
-            const poster = series.cover || '/img/placeholder.png';
-            const year = series.year || series.releaseDate?.substring(0, 4) || '';
-            const rating = series.rating ? `${Icons.star} ${series.rating}` : '';
+            const poster = Security.imageUrl(series.cover);
+            const name = Security.escapeHtml(series.name || 'Unknown');
+            const year = Security.escapeHtml(series.year || series.releaseDate?.substring(0, 4) || '');
+            const rating = series.rating ? `${Icons.star} ${Security.escapeHtml(series.rating)}` : '';
 
             const isFav = this.favoriteIds.has(`${series.sourceId}:${series.series_id}`);
 
             card.innerHTML = `
                 <div class="series-poster">
-                    <img src="${poster}" alt="${series.name}" 
-                         onerror="this.onerror=null;this.src='/img/placeholder.png'" loading="lazy">
+                    <img src="${Security.escapeAttribute(poster)}" alt="${name}" loading="lazy">
                     <div class="series-play-overlay">
                         <span class="play-icon">${Icons.play}</span>
                     </div>
@@ -306,7 +306,7 @@ class SeriesPage {
                     </button>
                 </div>
                 <div class="series-card-info">
-                    <div class="series-title">${series.name}</div>
+                    <div class="series-title">${name}</div>
                     <div class="series-meta">
                         ${year ? `<span>${year}</span>` : ''}
                         ${rating ? `<span>${rating}</span>` : ''}
@@ -350,7 +350,7 @@ class SeriesPage {
         this.detailsPanel.classList.remove('hidden');
 
         // Set header info
-        document.getElementById('series-poster').src = series.cover || '/img/placeholder.png';
+        document.getElementById('series-poster').src = Security.imageUrl(series.cover);
         document.getElementById('series-title').textContent = series.name;
         document.getElementById('series-plot').textContent = series.plot || '';
 
@@ -379,14 +379,14 @@ class SeriesPage {
                 <div class="season-group">
                     <div class="season-header">
                         <span class="season-expander">${Icons.chevronDown}</span>
-                        <span class="season-name">Season ${seasonNum} (${episodes.length} episodes)</span>
+                        <span class="season-name">Season ${Security.escapeHtml(seasonNum)} (${episodes.length} episodes)</span>
                     </div>
                     <div class="episode-list">
                         ${episodes.map(ep => `
-                            <div class="episode-item" data-episode-id="${ep.id}" data-source-id="${series.sourceId}" data-container="${ep.container_extension || 'mp4'}">
-                                <span class="episode-number">E${ep.episode_num}</span>
-                                <span class="episode-title">${ep.title || `Episode ${ep.episode_num}`}</span>
-                                <span class="episode-duration">${ep.duration || ''}</span>
+                            <div class="episode-item" data-episode-id="${Security.escapeAttribute(ep.id)}" data-source-id="${Security.escapeAttribute(series.sourceId)}" data-container="${Security.escapeAttribute(ep.container_extension || 'mp4')}">
+                                <span class="episode-number">E${Security.escapeHtml(ep.episode_num)}</span>
+                                <span class="episode-title">${Security.escapeHtml(ep.title || `Episode ${ep.episode_num}`)}</span>
+                                <span class="episode-duration">${Security.escapeHtml(ep.duration || '')}</span>
                             </div>
                         `).join('')}
                     </div>

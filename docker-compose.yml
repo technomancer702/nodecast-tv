@@ -1,13 +1,44 @@
 services:
   nodecast-tv:
-    image: ghcr.io/technomancer702/nodecast-tv:latest
-    build: https://github.com/technomancer702/nodecast-tv.git#main
+    image: nodecast-tv:local-secure
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: nodecast-tv
+    init: true
     ports:
-      - "3000:3000"
+      # Publish only to this computer, never to the LAN or internet.
+      - "127.0.0.1:3000:3000"
     volumes:
-      - ./data:/app/data
-    restart: unless-stopped
+      - type: bind
+        source: ./data
+        target: /app/data
     environment:
-      - NODE_ENV=production
-      - PORT=3000 # Internal container port
+      NODE_ENV: production
+      PORT: "3000"
+      # Avoid interrupting long-running local viewing sessions every 24 hours.
+      JWT_EXPIRY: 30d
+      # The container has its own network namespace; the host-side port above
+      # remains restricted to 127.0.0.1.
+      HOST: 0.0.0.0
+      ALLOW_PRIVATE_UPSTREAMS: "false"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+      - /app/transcode-cache:rw,noexec,nosuid,nodev,uid=1000,gid=1000,mode=0750,size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/login.html').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

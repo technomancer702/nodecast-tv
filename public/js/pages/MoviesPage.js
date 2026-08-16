@@ -278,16 +278,16 @@ class MoviesPage {
             card.dataset.movieId = movie.stream_id;
             card.dataset.sourceId = movie.sourceId;
 
-            const poster = movie.stream_icon || movie.cover || '/img/placeholder.png';
-            const year = movie.year || movie.releaseDate?.substring(0, 4) || '';
-            const rating = movie.rating ? `${Icons.star} ${movie.rating}` : '';
+            const poster = Security.imageUrl(movie.stream_icon || movie.cover);
+            const name = Security.escapeHtml(movie.name || 'Unknown');
+            const year = Security.escapeHtml(movie.year || movie.releaseDate?.substring(0, 4) || '');
+            const rating = movie.rating ? `${Icons.star} ${Security.escapeHtml(movie.rating)}` : '';
 
             const isFav = this.favoriteIds.has(`${movie.sourceId}:${movie.stream_id}`);
 
             card.innerHTML = `
                 <div class="movie-poster">
-                    <img src="${poster}" alt="${movie.name}" 
-                         onerror="this.onerror=null;this.src='/img/placeholder.png'" loading="lazy">
+                    <img src="${Security.escapeAttribute(poster)}" alt="${name}" loading="lazy">
                     <div class="movie-play-overlay">
                         <span class="play-icon">${Icons.play}</span>
                     </div>
@@ -296,7 +296,7 @@ class MoviesPage {
                     </button>
                 </div>
                 <div class="movie-info">
-                    <div class="movie-title">${movie.name}</div>
+                    <div class="movie-title">${name}</div>
                     <div class="movie-meta">
                         ${year ? `<span>${year}</span>` : ''}
                         ${rating ? `<span>${rating}</span>` : ''}
