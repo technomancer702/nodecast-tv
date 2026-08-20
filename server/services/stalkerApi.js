@@ -13,12 +13,51 @@ const CANDIDATE_PATHS = [
     '/c/portal.php'
 ];
 
+// Real STB clients handshake once at boot and reuse that token for hours across
+// many channel changes. Re-authenticating on every single stream request looks
+// like abuse to most portals/anti-fraud proxies and gets rate-limited/403'd, so
+// we cache the session per (portal, mac) and only re-handshake when it's missing,
+// expired, or a request comes back unauthorized.
+const SESSION_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const sessionCache = new Map();
+
+function sessionKey(baseUrl, mac) {
+    return `${baseUrl.toLowerCase()}|${mac.toUpperCase()}`;
+}
+
 class StalkerApi {
     constructor(baseUrl, mac, portalPath = null) {
         // Clean up base URL
         this.baseUrl = baseUrl.replace(/\/+$/, '');
         this.mac = mac;
         this.portalPath = portalPath || null;
+        this.token = null;
+        this.sessionKey = sessionKey(this.baseUrl, this.mac);
+    }
+
+    /**
+     * Adopt a still-fresh cached session (token + portalPath) if one exists.
+     */
+    restoreSession() {
+        const cached = sessionCache.get(this.sessionKey);
+        if (!cached || cached.expiresAt < Date.now()) {
+            return false;
+        }
+        this.token = cached.token;
+        this.portalPath = cached.portalPath;
+        return true;
+    }
+
+    saveSession() {
+        sessionCache.set(this.sessionKey, {
+            token: this.token,
+            portalPath: this.portalPath,
+            expiresAt: Date.now() + SESSION_TTL_MS
+        });
+    }
+
+    invalidateSession() {
+        sessionCache.delete(this.sessionKey);
         this.token = null;
     }
 
@@ -107,9 +146,13 @@ class StalkerApi {
     }
 
     /**
-     * Complete auth sequence: handshake + get_profile
+     * Complete auth sequence: handshake + get_profile. Reuses a cached session
+     * when available instead of re-authenticating with the portal.
      */
-    async authenticate() {
+    async authenticate({ force = false } = {}) {
+        if (!force && this.restoreSession()) {
+            return { token: this.token, portalPath: this.portalPath, profile: null, cached: true };
+        }
         await this.handshake();
         const { device_id, device_id2, sn } = this.deviceIds();
         const profile = await this.rawRequest(this.portalPath, {
@@ -135,17 +178,33 @@ class StalkerApi {
             api_signature: 262,
             prehash: ''
         });
+        this.saveSession();
         return { token: this.token, portalPath: this.portalPath, profile };
     }
 
     /**
-     * Generic authenticated request (re-handshakes if no token yet)
+     * Generic authenticated request. Reuses a cached session when possible and
+     * transparently re-handshakes once if the portal rejects the token (e.g. it
+     * was revoked server-side before our local TTL expired).
      */
-    async request(type, action, params = {}) {
+    async request(type, action, params = {}, _retried = false) {
         if (!this.token || !this.portalPath) {
-            await this.handshake();
+            if (!this.restoreSession()) {
+                await this.handshake();
+                this.saveSession();
+            }
         }
-        return this.rawRequest(this.portalPath, { type, action, ...params });
+        try {
+            return await this.rawRequest(this.portalPath, { type, action, ...params });
+        } catch (err) {
+            if (!_retried && /Stalker portal HTTP (401|403)/.test(err.message)) {
+                this.invalidateSession();
+                await this.handshake();
+                this.saveSession();
+                return this.request(type, action, params, true);
+            }
+            throw err;
+        }
     }
 
     /**
@@ -220,11 +279,12 @@ function createFromSource(source) {
 }
 
 /**
- * Static authenticate for testing a portal/mac combination
+ * Static authenticate for testing a portal/mac combination. Always does a live
+ * handshake (bypassing any cached session) since this backs the "test connection" UI.
  */
 async function authenticate(url, mac) {
     const api = new StalkerApi(url, mac);
-    const result = await api.authenticate();
+    const result = await api.authenticate({ force: true });
     return { ...result, portalPath: api.portalPath };
 }
 
