@@ -413,6 +413,14 @@
 
             <div class="source-section">
               <div class="section-header">
+                <h3>Stalker Portals</h3>
+                <button class="btn btn-primary" id="add-stalker">+ Add Stalker Portal</button>
+              </div>
+              <div id="stalker-list" class="source-list"></div>
+            </div>
+
+            <div class="source-section">
+              <div class="section-header">
                 <h3>M3U Playlists</h3>
                 <button class="btn btn-primary" id="add-m3u">+ Add M3U</button>
               </div>
@@ -1109,20 +1117,6 @@
   <script src="/js/pages/Settings.js?v=2"></script>
   <script src="/js/pages/WatchPage.js?v=1"></script>
   <script src="/js/app.js?v=4"></script>
-  <script>
-    // Check for SSO token in URL
-    (function () {
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token');
-      if (token) {
-        console.log('SSO Login successful, saving token...');
-        localStorage.setItem('authToken', token);
-        // Clean URL without reloading
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, newUrl);
-      }
-    })();
-  </script>
 </body>
 
 </html>

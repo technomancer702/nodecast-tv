@@ -165,24 +165,13 @@ class App {
     }
 
     async checkAuth() {
-        const token = localStorage.getItem('authToken');
-
-        if (!token) {
-            // No token, redirect to login (replace to avoid back button issues)
-            window.location.replace('/login.html');
-            return;
-        }
-
         try {
-            // Verify token with server
-            const response = await fetch('/api/auth/me', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
+            // The session cookie (set on login) is sent automatically with
+            // same-origin requests, so no token handling is needed here.
+            const response = await fetch('/api/auth/me');
 
             if (!response.ok) {
-                throw new Error('Invalid token');
+                throw new Error('Not authenticated');
             }
 
             this.currentUser = await response.json();
@@ -200,7 +189,6 @@ class App {
 
         } catch (err) {
             console.error('Authentication error:', err);
-            localStorage.removeItem('authToken');
             window.location.replace('/login.html');
         }
     }
@@ -223,17 +211,8 @@ class App {
         logoutLink.addEventListener('click', async (e) => {
             e.preventDefault();
 
-            const token = localStorage.getItem('authToken');
-            if (token) {
-                await fetch('/api/auth/logout', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-            }
+            await fetch('/api/auth/logout', { method: 'POST' });
 
-            localStorage.removeItem('authToken');
             window.location.replace('/login.html');
         });
 

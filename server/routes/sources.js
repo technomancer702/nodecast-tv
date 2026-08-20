@@ -3,8 +3,11 @@ const router = express.Router();
 const { sources } = require('../db');
 const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
+const stalkerApi = require('../services/stalkerApi');
 const syncService = require('../services/syncService');
 const m3uParser = require('../services/m3uParser');
+
+const MAC_REGEX = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 
 // Get all sources
 router.get('/', async (req, res) => {
@@ -63,17 +66,23 @@ router.get('/:id', async (req, res) => {
 // Create source
 router.post('/', async (req, res) => {
     try {
-        const { type, name, url, username, password } = req.body;
+        const { type, name, url, username, password, mac } = req.body;
 
         if (!type || !name || !url) {
             return res.status(400).json({ error: 'Type, name, and URL are required' });
         }
 
-        if (!['xtream', 'm3u', 'epg'].includes(type)) {
+        if (!['xtream', 'm3u', 'epg', 'stalker'].includes(type)) {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        const source = await sources.create({ type, name, url, username, password });
+        if (type === 'stalker') {
+            if (!mac || !MAC_REGEX.test(mac)) {
+                return res.status(400).json({ error: 'A valid MAC address (XX:XX:XX:XX:XX:XX) is required for Stalker Portal sources' });
+            }
+        }
+
+        const source = await sources.create({ type, name, url, username, password, mac: mac || null });
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
         res.status(201).json(source);
@@ -91,12 +100,20 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Source not found' });
         }
 
-        const { name, url, username, password } = req.body;
+        const { name, url, username, password, mac } = req.body;
+
+        if (existing.type === 'stalker' && mac !== undefined && mac !== '' && !MAC_REGEX.test(mac)) {
+            return res.status(400).json({ error: 'A valid MAC address (XX:XX:XX:XX:XX:XX) is required for Stalker Portal sources' });
+        }
+
         const updated = await sources.update(req.params.id, {
             name: name || existing.name,
             url: url || existing.url,
             username: username !== undefined ? username : existing.username,
-            password: password !== undefined ? password : existing.password
+            password: password !== undefined ? password : existing.password,
+            mac: mac !== undefined && mac !== '' ? mac : existing.mac,
+            // Portal path may no longer be valid if the URL changed; let the next handshake re-detect it
+            portalPath: url && url !== existing.url ? null : existing.portalPath
         });
         // Trigger Sync (if critical fields changed? safely just trigger it)
         syncService.syncSource(parseInt(req.params.id)).catch(console.error);
@@ -187,6 +204,13 @@ router.post('/:id/test', async (req, res) => {
 
         if (source.type === 'xtream') {
             const result = await xtreamApi.authenticate(source.url, source.username, source.password);
+            res.json({ success: true, data: result });
+        } else if (source.type === 'stalker') {
+            const result = await stalkerApi.authenticate(source.url, source.mac);
+            // Persist the detected portal path so subsequent requests skip auto-detection
+            if (result.portalPath && result.portalPath !== source.portalPath) {
+                await sources.update(source.id, { portalPath: result.portalPath });
+            }
             res.json({ success: true, data: result });
         } else if (source.type === 'm3u') {
             const response = await fetch(source.url);

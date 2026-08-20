@@ -16,6 +16,7 @@ app.set('trust proxy', true);
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
+app.use(require('cookie-parser')());
 
 // Initialize Passport
 const session = require('express-session');

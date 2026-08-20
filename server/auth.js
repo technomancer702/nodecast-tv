@@ -12,7 +12,9 @@ const { Strategy: LocalStrategy } = require('passport-local');
 
 // JWT Secret - In production, use environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'nodecast-tv-secret-key-change-in-production';
-const JWT_EXPIRY = '24h';
+const JWT_EXPIRY = '30d';
+const COOKIE_NAME = 'nodecast_token';
+const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days, matches JWT_EXPIRY
 
 /**
  * Hash password using bcrypt
@@ -87,7 +89,13 @@ function configureLocalStrategy(getUserByUsername, verifyUserPassword) {
  */
 function configureJwtStrategy(getUserById) {
     const options = {
-        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+        // Accept the token either as a Bearer header (API clients) or from the
+        // httpOnly cookie set on login (browser sessions), so a logged-in
+        // browser stays logged in without re-sending credentials.
+        jwtFromRequest: ExtractJwt.fromExtractors([
+            ExtractJwt.fromAuthHeaderAsBearerToken(),
+            (req) => (req && req.cookies) ? req.cookies[COOKIE_NAME] : null
+        ]),
         secretOrKey: JWT_SECRET
     };
 
@@ -226,6 +234,33 @@ function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
 }
 
 /**
+ * Set the auth cookie on the response so the browser stays logged in.
+ * `secure` is derived from the request (respects "trust proxy") rather than
+ * NODE_ENV, since self-hosted instances are often served over plain HTTP.
+ */
+function setAuthCookie(req, res, token) {
+    res.cookie(COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: req.secure,
+        sameSite: 'lax',
+        maxAge: COOKIE_MAX_AGE,
+        path: '/'
+    });
+}
+
+/**
+ * Clear the auth cookie (logout)
+ */
+function clearAuthCookie(req, res) {
+    res.clearCookie(COOKIE_NAME, {
+        httpOnly: true,
+        secure: req.secure,
+        sameSite: 'lax',
+        path: '/'
+    });
+}
+
+/**
  * Middleware: Require authentication using Passport JWT
  */
 const requireAuth = passport.authenticate('jwt', { session: false });
@@ -264,5 +299,7 @@ module.exports = {
     configureOidcStrategy,
     requireAuth,
     requireAdmin,
-    requireRole
+    requireRole,
+    setAuthCookie,
+    clearAuthCookie
 };

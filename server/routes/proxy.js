@@ -3,6 +3,7 @@ const router = express.Router();
 const { sources } = require('../db');
 const { getDb } = require('../db/sqlite'); // Import SQLite
 const xtreamApi = require('../services/xtreamApi');
+const stalkerApi = require('../services/stalkerApi');
 const epgParser = require('../services/epgParser');
 const cache = require('../services/cache');
 const path = require('path');
@@ -264,6 +265,46 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
     }
 });
 
+
+// --- Stalker Portal Proxy API --- //
+
+// Resolve a channel's stream URL via create_link (token-based, resolved fresh each time)
+router.get('/stalker/:sourceId/stream/:streamId', async (req, res) => {
+    try {
+        const sourceId = parseInt(req.params.sourceId);
+        const source = await sources.getById(sourceId);
+        if (!source || source.type !== 'stalker') {
+            return res.status(404).json({ error: 'Stalker source not found' });
+        }
+
+        const db = getDb();
+        const row = db.prepare(
+            'SELECT data FROM playlist_items WHERE source_id = ? AND type = ? AND item_id = ?'
+        ).get(sourceId, 'live', req.params.streamId);
+
+        if (!row) {
+            return res.status(404).json({ error: 'Channel not found' });
+        }
+
+        const data = JSON.parse(row.data || '{}');
+        if (!data.cmd) {
+            return res.status(422).json({ error: 'Channel is missing playback command' });
+        }
+
+        const api = stalkerApi.createFromSource(source);
+        const url = await api.resolveChannelStreamUrl(req.params.streamId, data.cmd);
+
+        // Persist the detected portal path so future requests skip auto-detection
+        if (api.portalPath && api.portalPath !== source.portalPath) {
+            await sources.update(sourceId, { portalPath: api.portalPath });
+        }
+
+        res.json({ url });
+    } catch (err) {
+        console.error('Stalker stream URL error:', err);
+        res.status(502).json({ error: 'Upstream error', details: err.message });
+    }
+});
 
 // --- Other Proxy Routes --- //
 

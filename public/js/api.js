@@ -14,16 +14,12 @@ const API = {
             }
         };
 
-        // Add authentication token if available
-        const token = localStorage.getItem('authToken');
-        if (token) {
-            options.headers['Authorization'] = `Bearer ${token}`;
-        }
-
         if (data) {
             options.body = JSON.stringify(data);
         }
 
+        // Session is carried via the httpOnly cookie set on login, sent
+        // automatically with this same-origin request.
         const response = await fetch(`/api${endpoint}`, options);
 
         let result;
@@ -38,7 +34,6 @@ const API = {
         if (!response.ok) {
             // If unauthorized, redirect to login
             if (response.status === 401) {
-                localStorage.removeItem('authToken');
                 window.location.href = '/login.html';
                 return;
             }
@@ -138,6 +133,11 @@ const API = {
             shortEpg: (sourceId, streamId) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}`),
             getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8') =>
                 API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?container=${container}`)
+        },
+
+        // Stalker Portal
+        stalker: {
+            getStreamUrl: (sourceId, streamId) => API.request('GET', `/proxy/stalker/${sourceId}/stream/${streamId}`)
         },
 
         // EPG

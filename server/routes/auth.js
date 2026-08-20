@@ -40,9 +40,10 @@ router.get('/oidc/callback',
     (req, res) => {
         // Successful authentication
         const token = auth.generateToken(req.user);
+        auth.setAuthCookie(req, res, token);
 
-        // Redirect to hompage with token
-        res.redirect(`/?token=${token}`);
+        // Redirect to homepage - the browser is now logged in via cookie
+        res.redirect('/');
     }
 );
 
@@ -93,6 +94,7 @@ router.post('/setup', async (req, res) => {
 
         // Generate token for immediate login
         const token = auth.generateToken(adminUser);
+        auth.setAuthCookie(req, res, token);
 
         res.status(201).json({
             message: 'Admin user created successfully',
@@ -122,6 +124,7 @@ router.post('/login', (req, res, next) => {
 
         // Generate JWT token
         const token = auth.generateToken(user);
+        auth.setAuthCookie(req, res, token);
 
         res.json({
             token,
@@ -139,8 +142,7 @@ router.post('/login', (req, res, next) => {
  * POST /api/auth/logout
  */
 router.post('/logout', (req, res) => {
-    // With JWT, logout is handled client-side by removing the token
-    // This endpoint exists for consistency and future server-side token blacklisting
+    auth.clearAuthCookie(req, res);
     res.json({ success: true, message: 'Logged out successfully' });
 });
 
