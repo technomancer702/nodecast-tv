@@ -269,6 +269,33 @@ class StalkerApi {
         await this.authenticate();
         return this.createLink(cmd);
     }
+
+    /**
+     * Full flow: authenticate, fetch a fresh copy of a channel's `cmd` straight
+     * from the portal, and resolve it into a playable stream URL. Some portals
+     * embed a short-lived play_token directly in `cmd`, so a value cached from a
+     * prior sync can already be stale by playback time - real STB clients always
+     * pull the channel list fresh right before playing, so we mirror that here.
+     * Falls back to `fallbackCmd` (e.g. the last-synced DB value) if the live
+     * channel list can't be fetched or no longer contains this channel.
+     */
+    async resolveChannelStreamUrl(channelId, fallbackCmd = null) {
+        await this.authenticate();
+        let cmd = fallbackCmd;
+        try {
+            const channels = await this.getAllChannels();
+            const channel = channels.find(ch => String(ch.id) === String(channelId));
+            if (channel && channel.cmd) {
+                cmd = channel.cmd;
+            }
+        } catch (err) {
+            if (!cmd) throw err;
+        }
+        if (!cmd) {
+            throw new Error(`Channel ${channelId} not found on portal`);
+        }
+        return this.createLink(cmd);
+    }
 }
 
 /**

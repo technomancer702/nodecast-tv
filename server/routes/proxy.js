@@ -292,7 +292,7 @@ router.get('/stalker/:sourceId/stream/:streamId', async (req, res) => {
         }
 
         const api = stalkerApi.createFromSource(source);
-        const url = await api.resolveStreamUrl(data.cmd);
+        const url = await api.resolveChannelStreamUrl(req.params.streamId, data.cmd);
 
         // Persist the detected portal path so future requests skip auto-detection
         if (api.portalPath && api.portalPath !== source.portalPath) {
