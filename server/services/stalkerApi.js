@@ -168,15 +168,39 @@ class StalkerApi {
      * Resolve a channel's `cmd` into a real, playable stream URL
      */
     async createLink(cmd) {
-        const js = await this.request('itv', 'create_link', {
-            cmd,
-            forced_storage: 'undefined',
-            disable_ad: 0,
-            JsHttpRequest: '1-xml'
-        });
+        let js;
+        try {
+            js = await this.request('itv', 'create_link', {
+                cmd,
+                forced_storage: 'undefined',
+                disable_ad: 0,
+                JsHttpRequest: '1-xml'
+            });
+        } catch (err) {
+            // Some portals hand out a `cmd` from get_all_channels that's already a
+            // fully-resolved, playable URL (real host + mac + play_token) rather than
+            // a "ffmpeg http://localhost/ch/..._" template. Their create_link handler
+            // then rejects it as an invalid CMD since there's nothing left to resolve.
+            // Fall back to using the original cmd directly in that case.
+            if (/^ffmpeg\s+https?:\/\//i.test(cmd)) {
+                return cmd.replace(/^ffmpeg\s+/i, '').trim();
+            }
+            throw err;
+        }
         const resolved = js.cmd || cmd;
         // Portal often prefixes the resolved command with "ffmpeg "
-        return resolved.replace(/^ffmpeg\s+/i, '').trim();
+        const url = resolved.replace(/^ffmpeg\s+/i, '').trim();
+
+        // Some portals echo back an unresolved URL template (e.g.
+        // ".../play/live.php?mac=...&stream=&extension=ts&play_token=...")
+        // when the cmd we sent doesn't map to a valid channel/session. Feeding
+        // that straight to ffmpeg just burns a transcode attempt on a
+        // guaranteed 5xx from the origin, so fail fast with a clear reason.
+        if (/[?&]stream=(&|$)/.test(url)) {
+            throw new Error(`Stalker portal returned an unresolved stream URL (empty "stream" id) for cmd "${cmd}"`);
+        }
+
+        return url;
     }
 
     /**
