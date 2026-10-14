@@ -512,6 +512,36 @@ const users = {
     });
   },
 
+  /**
+   * Atomically record a used TOTP time step. Returns false if this step (or a
+   * later one) was already used, so each code can only log in once.
+   */
+  async consumeTotpStep(id, step) {
+    return mutateDb((db, markChanged) => {
+      const user = db.users?.find(u => u.id === parseInt(id));
+      if (!user || !user.totpEnabled || !Number.isInteger(step)) return false;
+      if (Number.isInteger(user.totpLastStep) && step <= user.totpLastStep) return false;
+      user.totpLastStep = step;
+      markChanged();
+      return true;
+    });
+  },
+
+  /**
+   * Atomically remove a recovery code by its stored hash. Returns false if it
+   * was already consumed (e.g. by a concurrent request).
+   */
+  async consumeRecoveryCode(id, hash) {
+    return mutateDb((db, markChanged) => {
+      const user = db.users?.find(u => u.id === parseInt(id));
+      const index = user?.totpEnabled && Array.isArray(user.recoveryCodes) ? user.recoveryCodes.indexOf(hash) : -1;
+      if (!hash || index === -1) return false;
+      user.recoveryCodes[index] = null;
+      markChanged();
+      return true;
+    });
+  },
+
   async delete(id) {
     return mutateDb((db, markChanged) => {
       const userIndex = db.users?.findIndex(u => u.id === parseInt(id));
