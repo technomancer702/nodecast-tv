@@ -1,12 +1,13 @@
 const { discoverOidcEndpoints } = require('./services/oidcDiscovery');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const passport = require('passport');
 const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const { Strategy: LocalStrategy } = require('passport-local');
+const speakeasy = require('speakeasy');
 const security = require('./config/security');
 const authTokens = require('./services/authTokens');
-const crypto = require('node:crypto');
 
 /**
  * Authentication and Authorization Module
@@ -17,6 +18,15 @@ const crypto = require('node:crypto');
 // JWT Secret - In production, use environment variable
 const JWT_SECRET = security.jwtSecret;
 const JWT_EXPIRY = '24h';
+const MFA_TOKEN_EXPIRY = '5m';
+const MFA_AUDIENCE = 'nodecast-tv:mfa';
+// The pending-2FA challenge token uses its own key and audience so it can never
+// verify as an access token (and vice versa).
+const MFA_SECRET = crypto.createHmac('sha256', JWT_SECRET).update('nodecast-tv:mfa-challenge').digest();
+const TOTP_STEP_SECONDS = 30;
+
+// AES-256-GCM key for TOTP secrets at rest (env or persisted, see config/security)
+const TOTP_KEY = security.totpEncryptionKey;
 
 /**
  * Hash password using bcrypt
@@ -61,6 +71,132 @@ function verifyToken(token) {
     } catch (err) {
         return null;
     }
+}
+
+/**
+ * Issue the short-lived challenge token for the 2FA step. It only proves the
+ * password was correct and is accepted exclusively by POST /api/auth/2fa/verify.
+ */
+function generateMfaToken(user) {
+    return jwt.sign(
+        { sub: String(user.id), kind: 'mfa', authVersion: user.authVersion || 0 },
+        MFA_SECRET,
+        { expiresIn: MFA_TOKEN_EXPIRY, algorithm: 'HS256', audience: MFA_AUDIENCE, jwtid: crypto.randomUUID() }
+    );
+}
+
+/**
+ * Verify a 2FA challenge token and return its payload, or null if invalid,
+ * expired, already used, or not a challenge token.
+ */
+function verifyMfaToken(token) {
+    if (typeof token !== 'string') return null;
+    try {
+        const payload = jwt.verify(token, MFA_SECRET, { algorithms: ['HS256'], audience: MFA_AUDIENCE });
+        if (payload.kind !== 'mfa' || typeof payload.jti !== 'string' || !/^\d+$/.test(payload.sub || '')) return null;
+        if (authTokens.isRevoked(payload)) return null;
+        return payload;
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * Generate a new TOTP secret for a user (returns base32 string)
+ */
+function generateTotpSecret() {
+    return speakeasy.generateSecret({ length: 20 }).base32;
+}
+
+/**
+ * Generate the otpauth URI used to build the QR code
+ */
+function generateTotpUri(username, secret) {
+    return speakeasy.otpauthURL({
+        secret,
+        label: username,
+        issuer: 'NodeCast TV',
+        encoding: 'base32'
+    });
+}
+
+/**
+ * Verify a TOTP token against a secret
+ */
+function verifyTotpToken(token, secret) {
+    return matchTotpStep(token, secret) !== null;
+}
+
+/**
+ * Return the absolute 30s time step a TOTP code belongs to (allowing one step
+ * of clock drift), or null if it does not match. Callers record the step to
+ * reject replays of the same code.
+ */
+function matchTotpStep(token, secret) {
+    if (!/^\d{6}$/.test(String(token))) return null;
+    try {
+        const match = speakeasy.totp.verifyDelta({ secret, encoding: 'base32', token: String(token), window: 1 });
+        if (!match) return null;
+        return Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS) + match.delta;
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * Encrypt a TOTP secret using AES-256-GCM.
+ * Format: "enc:iv(hex):authTag(hex):ciphertext(hex)"
+ */
+function encryptSecret(plaintext) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', TOTP_KEY, iv);
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `enc:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+/**
+ * Decrypt a TOTP secret encrypted by encryptSecret().
+ * Returns the value unchanged if it was stored unencrypted (dev fallback).
+ */
+function decryptSecret(value) {
+    // Secrets stored before encryption was enabled are still accepted as-is
+    if (!value || !value.startsWith('enc:')) return value;
+    const [, ivHex, tagHex, ctHex] = value.split(':');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', TOTP_KEY, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return decipher.update(Buffer.from(ctHex, 'hex')) + decipher.final('utf8');
+}
+
+/**
+ * Generate N single-use recovery codes (format: XXXXX-XXXXX).
+ * Returns { plaintext: string[], hashed: string[] } — store hashed, show plaintext once.
+ */
+async function generateRecoveryCodes(count = 8) {
+    const plaintext = Array.from({ length: count }, () => {
+        const hex = crypto.randomBytes(5).toString('hex').toUpperCase();
+        return `${hex.slice(0, 5)}-${hex.slice(5)}`;
+    });
+    const hashed = await Promise.all(plaintext.map(c => bcrypt.hash(c, 10)));
+    return { plaintext, hashed };
+}
+
+/**
+ * Find and consume a recovery code. Returns the index of the matched code, or -1.
+ */
+/**
+ * Return the stored hash matching a recovery code, or null. The hash (not an
+ * index) is what db.users.consumeRecoveryCode removes atomically.
+ */
+async function matchRecoveryCode(input, hashedCodes) {
+    if (typeof input !== 'string' || !Array.isArray(hashedCodes)) return null;
+    const normalized = input.replace(/\s/g, '').toUpperCase();
+    if (!/^[0-9A-F]{5}-?[0-9A-F]{5}$/.test(normalized)) return null;
+    const formatted = normalized.includes('-') ? normalized : `${normalized.slice(0, 5)}-${normalized.slice(5)}`;
+    for (const hash of hashedCodes) {
+        if (hash && await bcrypt.compare(formatted, hash)) return hash;
+    }
+    return null;
 }
 
 /**
@@ -311,6 +447,16 @@ module.exports = {
     verifyPassword,
     generateToken,
     verifyToken,
+    generateMfaToken,
+    verifyMfaToken,
+    generateTotpSecret,
+    generateTotpUri,
+    verifyTotpToken,
+    matchTotpStep,
+    encryptSecret,
+    decryptSecret,
+    generateRecoveryCodes,
+    matchRecoveryCode,
     configureLocalStrategy,
     configureJwtStrategy,
     configureSessionSerialization,
