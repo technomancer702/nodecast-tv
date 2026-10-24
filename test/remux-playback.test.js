@@ -19,9 +19,9 @@ test('probe preserves every audio track index including unknown codecs', () => {
     assert.equal(info.needsRemux, true);
 });
 
-function playerFixture(name, settings, probe) {
+function playerFixture(name, settings, probe, navigator = { userAgent: 'Mozilla/5.0 (X11; Linux x86_64)', maxTouchPoints: 0 }) {
     const window = { dispatchEvent() {} };
-    const context = { window, HlsAudioRecovery: require('../public/js/components/HlsAudioRecovery'), PlaybackProbe: require('../public/js/components/PlaybackProbe'), CaptionTracks: require('../public/js/components/CaptionTracks'), VodDuration: require('../public/js/components/VodDuration'), console: { log() {}, warn() {}, error() {} },
+    const context = { window, navigator, HlsAudioRecovery: require('../public/js/components/HlsAudioRecovery'), PlaybackProbe: require('../public/js/components/PlaybackProbe'), CaptionTracks: require('../public/js/components/CaptionTracks'), VodDuration: require('../public/js/components/VodDuration'), console: { log() {}, warn() {}, error() {} },
         CustomEvent: class {}, document: { getElementById() { return null; } },
         API: { settings: { get: async () => settings } }, fetch: probe };
     const file = name === 'VideoPlayer' ? 'components/VideoPlayer.js' : 'pages/WatchPage.js';
@@ -40,6 +40,26 @@ function playerFixture(name, settings, probe) {
     });
     player.start = url => name === 'VideoPlayer' ? player.play({ id: url }, url) : player.loadVideo(url);
     return player;
+}
+
+for (const [device, navigator] of [
+    ['iPhone', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1', maxTouchPoints: 5 }],
+    ['iPad', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15', platform: 'MacIntel', maxTouchPoints: 5 }]
+]) {
+    for (const mode of ['autoTranscode', 'forceRemux']) {
+        test(`VideoPlayer ${mode} uses a copy HLS session for remux on ${device}`, async () => {
+            const player = playerFixture('VideoPlayer', { [mode]: true }, async () => ({
+                json: async () => ({ video: 'h264', audio: 'aac', audioCodecs: ['aac'], needsRemux: true })
+            }), navigator);
+            const url = 'http://provider.test/live/1.ts';
+            await player.start(url);
+            assert.equal(player.sessions.length, 1);
+            assert.equal(player.sessions[0].url, url);
+            assert.equal(player.sessions[0].options.videoMode, 'copy');
+            assert.equal(player.sessions[0].options.videoCodec, 'h264');
+            assert.equal(player.video.src, '/api/session/stream.m3u8');
+        });
+    }
 }
 
 for (const name of ['VideoPlayer', 'WatchPage']) {
