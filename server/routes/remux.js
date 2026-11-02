@@ -137,6 +137,8 @@ router.get('/', async (req, res) => {
         // Fragmented MP4 for streaming (browser-compatible)
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        // Also cut fragments every 0.5s so the first one doesn't wait a full GOP for the next keyframe
+        '-frag_duration', '500000',
         '-' // Output to stdout
     ];
 
