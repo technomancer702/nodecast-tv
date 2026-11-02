@@ -8,6 +8,12 @@ function isMobile() {
     return /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
+// iPadOS reports a desktop Safari user agent, so also check for touch support
+function isIOS() {
+    const nav = globalThis.navigator || {};
+    return /iP(hone|ad|od)/.test(nav.userAgent) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1);
+}
+
 class VideoPlayer {
     constructor() {
         this.video = document.getElementById('video-player');
@@ -177,8 +183,7 @@ class VideoPlayer {
         }
 
         // iOS: use custom --vh unit to avoid 100vh issues with dynamic toolbar
-        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
-        if (isIOS && this.container) {
+        if (isIOS() && this.container) {
             const vh = window.innerHeight * 0.01;
             document.documentElement.style.setProperty('--vh', `${vh}px`);
             this.container.style.height = 'calc(var(--vh) * 100)';
@@ -705,14 +710,7 @@ class VideoPlayer {
                         // Raw .ts container - use remux
                         console.log('[Player] Auto: Using remux (.ts container)');
                         this.updateTranscodeStatus('remuxing', 'Remux (Auto)');
-                        const remuxUrl = this.getRemuxUrl(streamUrl, info.audioCodecs || [info.audio], channel?.program);
-                        this.currentUrl = remuxUrl;
-                        this.getCaptionTracks().setProbe(probeInfo, streamUrl);
-                        this.getCaptionTracks().useNative();
-                        this.video.src = remuxUrl;
-                        this.video.play().catch(e => {
-                            if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
-                        });
+                        if (!await this.playRemux(streamUrl, info, channel, playbackGeneration)) return;
                         this.updateNowPlaying(channel);
                         this.showNowPlayingOverlay();
                         this.fetchEpgData(channel);
@@ -810,14 +808,7 @@ class VideoPlayer {
                     }
                 }
                 if (this.playbackGeneration !== playbackGeneration) return;
-                const remuxUrl = this.getRemuxUrl(streamUrl, probeInfo?.audioCodecs || (probeInfo?.audio ? [probeInfo.audio] : []), channel?.program);
-                this.currentUrl = remuxUrl;
-                this.getCaptionTracks().setProbe(probeInfo, streamUrl);
-                this.getCaptionTracks().useNative();
-                this.video.src = remuxUrl;
-                this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
-                });
+                if (!await this.playRemux(streamUrl, probeInfo, channel, playbackGeneration)) return;
 
                 // Update UI and dispatch events
                 this.updateNowPlaying(channel);
@@ -896,6 +887,19 @@ class VideoPlayer {
     playHls(url) {
         if (this.hls) {
             this.hls.destroy();
+        }
+
+        this.hls = null;
+        this.audioRecovery?.dispose();
+        this.audioRecovery = null;
+        if (typeof Hls.isSupported === 'function' && !Hls.isSupported() &&
+            this.video.canPlayType('application/vnd.apple.mpegurl')) {
+            this.getCaptionTracks().useNative({ allowProbe: false });
+            this.video.src = url;
+            this.video.play().catch(error => {
+                if (error.name !== 'AbortError') console.log('[Player] Native HLS autoplay prevented:', error);
+            });
+            return;
         }
 
         this.hls = new Hls(this.getHlsConfig());
@@ -1095,6 +1099,37 @@ class VideoPlayer {
     getRemuxUrl(url, audioCodecs = [], program = null) {
         const selection = program == null ? '' : '&program=' + encodeURIComponent(program);
         return `/api/remux?url=${encodeURIComponent(url)}&audioCodecs=${encodeURIComponent(audioCodecs.join(','))}${selection}`;
+    }
+
+    /**
+     * Play a raw TS stream without re-encoding.
+     * iOS cannot play the open-ended fMP4 pipe from /api/remux, so it gets a
+     * copy-mode HLS session instead. Returns false if playback did not start.
+     */
+    async playRemux(streamUrl, info, channel, generation) {
+        this.getCaptionTracks().setProbe(info, streamUrl);
+        if (isIOS()) {
+            const playlistUrl = await this.startTranscodeSession(streamUrl, {
+                program: channel?.program || null,
+                videoMode: 'copy',
+                videoCodec: info?.video,
+                audioCodec: info?.audio,
+                audioChannels: info?.audioChannels,
+                videoHeight: info?.height
+            });
+            if (!playlistUrl || this.playbackGeneration !== generation) return false;
+            this.currentUrl = playlistUrl;
+            this.playHls(playlistUrl);
+            return true;
+        }
+        const remuxUrl = this.getRemuxUrl(streamUrl, info?.audioCodecs || (info?.audio ? [info.audio] : []), channel?.program);
+        this.currentUrl = remuxUrl;
+        this.getCaptionTracks().useNative();
+        this.video.src = remuxUrl;
+        this.video.play().catch(e => {
+            if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+        });
+        return true;
     }
 
     /**
