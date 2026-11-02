@@ -174,3 +174,26 @@ test('second-factor guessing is rate limited per client', async t => {
     }
     assert.equal((await request('/api/auth/2fa/verify', { body: { tempToken: 'invalid', code: '000000' } })).status, 429);
 });
+
+
+test('a challenge atomically consumes only one of two different recovery codes', async t => {
+ const fixture=await serverFixture(t); const enrolled=await enrolledAdmin(fixture);
+ const tempToken=await challenge(fixture.request);
+ const results=await Promise.all(enrolled.recoveryCodes.slice(0,2).map(code=>fixture.request('/api/auth/2fa/verify',{body:{tempToken,code}})));
+ assert.deepEqual(results.map(r=>r.status).sort(),[200,401]);
+ assert.equal(fixture.readDb().users[0].recoveryCodes.filter(x=>x===null).length,1);
+ const remaining=enrolled.recoveryCodes[results.findIndex(r=>r.status===401)];
+ assert.equal((await fixture.request('/api/auth/2fa/verify',{body:{tempToken:await challenge(fixture.request),code:remaining}})).status,200);
+});
+
+test('admin reset keeps the new enrollment QR visible after refreshing status', async () => {
+ const vm=require('node:vm'),nodes=new Map();
+ const context={window:{},console,confirm:()=>true,alert:()=>{},document:{getElementById(id){if(!nodes.has(id))nodes.set(id,{style:{},value:''});return nodes.get(id);}},
+ API:{auth:{totp:{adminReset:async()=>({qrDataUrl:'data:fixture'}),adminStatus:async()=>({totpEnabled:false})}}}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../public/js/pages/Settings.js'),'utf8'),context);
+ const Klass=Object.values(context.window).find(v=>typeof v==='function');
+ await Object.create(Klass.prototype).resetUserTotp(1);
+ assert.equal(nodes.get('edit-totp-reset').style.display,'block');
+ assert.equal(nodes.get('edit-totp-reset-qr').src,'data:fixture');
+ assert.equal(nodes.get('edit-totp-actions').style.display,'none');
+});

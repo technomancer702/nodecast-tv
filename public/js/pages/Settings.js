@@ -717,9 +717,10 @@ class SettingsPage {
 
         try {
             const { qrDataUrl } = await API.auth.totp.adminReset(userId);
+            await this.loadUserTotpStatus(userId);
             document.getElementById('edit-totp-reset-qr').src = qrDataUrl;
             document.getElementById('edit-totp-reset').style.display = 'block';
-            await this.loadUserTotpStatus(userId);
+            document.getElementById('edit-totp-actions').style.display = 'none';
         } catch (err) {
             document.getElementById('edit-totp-actions').style.display = 'flex';
             alert('Error resetting 2FA: ' + err.message);

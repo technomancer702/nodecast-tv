@@ -13,4 +13,8 @@ function isRevoked(payload) {
 function revoke(payload) {
     store().prepare('INSERT OR REPLACE INTO auth_revocations (id, expires_at) VALUES (?, ?)').run(payload.jti, payload.exp);
 }
-module.exports = { isRevoked, revoke };
+function consume(payload) {
+    return store().prepare('INSERT OR IGNORE INTO auth_revocations (id, expires_at) VALUES (?, ?)')
+        .run(payload.jti, payload.exp).changes === 1;
+}
+module.exports = { isRevoked, revoke, consume };

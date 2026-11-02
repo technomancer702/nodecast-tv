@@ -186,17 +186,15 @@ router.post('/2fa/verify', totpVerifyLimiter, async (req, res) => {
         // TOTP codes and recovery codes are each consumed atomically, so a code
         // replayed (or raced) by a second request is rejected
         const step = auth.matchTotpStep(code.trim(), auth.decryptSecret(user.totpSecret));
-        let accepted = step !== null && await db.users.consumeTotpStep(user.id, step);
-        if (!accepted && step === null) {
-            const hash = await auth.matchRecoveryCode(code, user.recoveryCodes);
-            accepted = hash !== null && await db.users.consumeRecoveryCode(user.id, hash);
-        }
+        const recoveryHash = step === null ? await auth.matchRecoveryCode(code, user.recoveryCodes) : null;
+        const accepted = await db.users.consumeMfaChallenge(user.id, {
+            challenge, authVersion: challenge.authVersion || 0, secret: user.totpSecret, step, recoveryHash
+        });
         if (!accepted) {
             return res.status(401).json({ error: 'Invalid authenticator code' });
         }
 
         // The challenge token is single-use
-        authTokens.revoke(challenge);
 
         const token = auth.generateToken(user);
         auth.setAuthCookie(req, res, token);
