@@ -512,6 +512,54 @@ const users = {
     });
   },
 
+  /**
+   * Atomically record a used TOTP time step. Returns false if this step (or a
+   * later one) was already used, so each code can only log in once.
+   */
+  async consumeMfaChallenge(id, { challenge, authVersion, secret, step, recoveryHash }) {
+    return mutateDb((db, markChanged) => {
+      const user = db.users?.find(u => u.id === parseInt(id));
+      if (!user?.totpEnabled || user.totpSecret !== secret || (user.authVersion || 0) !== authVersion) return false;
+      const recoveryIndex = recoveryHash && user.recoveryCodes?.indexOf(recoveryHash);
+      if (step !== null) {
+        if (!Number.isInteger(step) || (Number.isInteger(user.totpLastStep) && step <= user.totpLastStep)) return false;
+      } else if (!recoveryHash || !Number.isInteger(recoveryIndex) || recoveryIndex < 0) return false;
+      // Claim the challenge before changing the factor. The database queue prevents
+      // concurrent requests from burning another recovery code for a used challenge.
+      if (!require('./services/authTokens').consume(challenge)) return false;
+      if (step !== null) user.totpLastStep = step;
+      else user.recoveryCodes[recoveryIndex] = null;
+      markChanged();
+      return true;
+    });
+  },
+
+  async consumeTotpStep(id, step) {
+    return mutateDb((db, markChanged) => {
+      const user = db.users?.find(u => u.id === parseInt(id));
+      if (!user || !user.totpEnabled || !Number.isInteger(step)) return false;
+      if (Number.isInteger(user.totpLastStep) && step <= user.totpLastStep) return false;
+      user.totpLastStep = step;
+      markChanged();
+      return true;
+    });
+  },
+
+  /**
+   * Atomically remove a recovery code by its stored hash. Returns false if it
+   * was already consumed (e.g. by a concurrent request).
+   */
+  async consumeRecoveryCode(id, hash) {
+    return mutateDb((db, markChanged) => {
+      const user = db.users?.find(u => u.id === parseInt(id));
+      const index = user?.totpEnabled && Array.isArray(user.recoveryCodes) ? user.recoveryCodes.indexOf(hash) : -1;
+      if (!hash || index === -1) return false;
+      user.recoveryCodes[index] = null;
+      markChanged();
+      return true;
+    });
+  },
+
   async delete(id) {
     return mutateDb((db, markChanged) => {
       const userIndex = db.users?.findIndex(u => u.id === parseInt(id));

@@ -1,6 +1,6 @@
 {
     "name": "nodecast-tv",
-    "version": "2.2.7",
+    "version": "2.2.8",
     "description": "Modern IPTV Player",
     "license": "GPL-3.0-only",
     "main": "server/index.js",
@@ -21,7 +21,9 @@
         "passport-jwt": "^4.0.1",
         "passport-local": "^1.0.0",
         "passport-openidconnect": "^0.1.2",
+        "qrcode": "^1.5.4",
         "sax": "^1.4.3",
+        "speakeasy": "^2.0.0",
         "xml2js": "^0.6.2"
     },
     "optionalDependencies": {
