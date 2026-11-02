@@ -39,7 +39,7 @@ function playerFixture(name, settings, probe, navigator = { userAgent: 'Mozilla/
         showError(message) { throw new Error(message); }
     });
     player.start = url => name === 'VideoPlayer' ? player.play({ id: url }, url) : player.loadVideo(url);
-    return player;
+    player.fixtureContext = context; return player;
 }
 
 for (const [device, navigator] of [
@@ -116,4 +116,16 @@ for (const name of ['VideoPlayer', 'WatchPage']) {
         await playing;
         assert.equal(player.video.src, '');
     });
+}
+
+for (const mode of ['autoTranscode', 'forceRemux']) {
+ test('iOS native-only HLS starts the remux session in ' + mode, async () => {
+  const player=playerFixture('VideoPlayer',{[mode]:true},async()=>({json:async()=>({video:'h264',audio:'aac',needsRemux:true})}),{userAgent:'iPhone',maxTouchPoints:5});
+  player.fixtureContext.Hls=class { static isSupported(){return false;} constructor(){throw Error('Unsupported MSE must not be constructed');} };
+  player.video.canPlayType=()=> 'probably';
+  player.playHls=player.fixtureContext.window.VideoPlayer.prototype.playHls;
+  await player.start('http://provider/live.ts');
+  assert.equal(player.video.src,'/api/session/stream.m3u8'); assert.equal(player.hls,null);
+  assert.equal(player.sessions.length,1);
+ });
 }

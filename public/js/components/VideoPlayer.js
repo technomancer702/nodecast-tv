@@ -889,6 +889,19 @@ class VideoPlayer {
             this.hls.destroy();
         }
 
+        this.hls = null;
+        this.audioRecovery?.dispose();
+        this.audioRecovery = null;
+        if (typeof Hls.isSupported === 'function' && !Hls.isSupported() &&
+            this.video.canPlayType('application/vnd.apple.mpegurl')) {
+            this.getCaptionTracks().useNative({ allowProbe: false });
+            this.video.src = url;
+            this.video.play().catch(error => {
+                if (error.name !== 'AbortError') console.log('[Player] Native HLS autoplay prevented:', error);
+            });
+            return;
+        }
+
         this.hls = new Hls(this.getHlsConfig());
         const hls = this.hls, generation = this.playbackGeneration;
         this.audioRecovery?.dispose();
