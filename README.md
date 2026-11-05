@@ -92,6 +92,14 @@ Container images are published to `ghcr.io/technomancer702/nodecast-tv` when a G
 
 The application will be available at `http://localhost:3000`.
 
+### Deploy with Easypanel
+
+[Easypanel](https://easypanel.io) is a self-hosted Docker deployment platform, and nodecast-tv has a one-click deployment template there:
+
+[![Deploy on Easypanel][easypanel-btn]][easypanel-deploy]
+
+[easypanel-btn]: https://easypanel.io/img/deploy-on-easypanel-40.svg
+[easypanel-deploy]: https://easypanel.io/templates/nodecast-tv
 
 ### Hardware Acceleration Setup
 
